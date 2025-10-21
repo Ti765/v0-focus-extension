@@ -7,10 +7,11 @@ import { handleMessage } from "./modules/message-handler"
 import { STORAGE_KEYS, DEFAULT_SETTINGS, DEFAULT_POMODORO_CONFIG } from "../shared/constants"
 import type { AppState, PomodoroStatus } from "../shared/types"
 
-declare const chrome: typeof import("chrome-types").chrome
+// CORREÇÃO: Removido o 'declare const chrome' que estava causando conflitos.
+// O tsconfig.json já carrega os tipos corretos para a API do Chrome.
 
 // Service Worker initialization
-chrome.runtime.onInstalled.addListener(async (details) => {
+chrome.runtime.onInstalled.addListener(async (details: chrome.runtime.InstalledDetails) => {
   console.log("[v0] Extension installed/updated:", details.reason)
 
   // Initialize default state on first install
@@ -66,7 +67,8 @@ chrome.runtime.onStartup.addListener(async () => {
 })
 
 // Message handling - central communication hub
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+// CORREÇÃO: Adicionados os tipos corretos para os parâmetros do listener.
+chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   console.log("[v0] Message received:", message.type, message.payload)
 
   // Handle message asynchronously

@@ -1,7 +1,7 @@
 import { STORAGE_KEYS, ALARM_NAMES, DEFAULT_POMODORO_CONFIG } from "../../shared/constants"
 import type { PomodoroStatus, PomodoroConfig } from "../../shared/types"
 import { enablePomodoroBlocking, disablePomodoroBlocking } from "./blocker"
-import { chrome } from "chrome-extension-api"
+// A linha 'import { chrome } from "chrome-extension-api"' foi removida daqui.
 
 export async function initializePomodoro() {
   console.log("[v0] Initializing Pomodoro module")

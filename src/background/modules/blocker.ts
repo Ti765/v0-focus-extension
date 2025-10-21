@@ -1,6 +1,6 @@
 import { STORAGE_KEYS } from "../../shared/constants"
 import type { BlacklistEntry } from "../../shared/types"
-import { chrome } from "chrome-extension-api"
+// A linha 'import { chrome } from "chrome-extension-api"' foi removida daqui.
 
 // MV3 compliant blocking using declarativeNetRequest
 export async function initializeBlocker() {

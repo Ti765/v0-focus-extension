@@ -35,6 +35,8 @@ export const useStore = create<PopupStore>((set, get) => ({
     distractingKeywords: [],
     notificationsEnabled: true,
   },
+  // CORREÇÃO: Adicionado o campo 'siteCustomizations' que estava faltando no estado inicial.
+  siteCustomizations: {},
   isLoading: true,
 
   // Actions
@@ -44,10 +46,16 @@ export const useStore = create<PopupStore>((set, get) => ({
         type: "GET_INITIAL_STATE",
       } as Message)
 
-      set({
-        ...response,
-        isLoading: false,
-      })
+      if (response) {
+        set({
+          ...response,
+          isLoading: false,
+        })
+      } else {
+        // Lida com o caso de a resposta ser undefined, talvez por erro na comunicação
+        console.error("[v0] Failed to get initial state, response was empty.");
+        set({ isLoading: false });
+      }
     } catch (error) {
       console.error("[v0] Error loading state:", error)
       set({ isLoading: false })

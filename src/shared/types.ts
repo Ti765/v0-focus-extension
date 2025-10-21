@@ -10,7 +10,8 @@ export type MessageType =
   | "TOGGLE_ZEN_MODE"
   | "SET_TIME_LIMIT"
   | "UPDATE_SETTINGS"
-  | "SITE_CUSTOMIZATION_UPDATED"
+  // CORREÇÃO: Adicionado o novo tipo de mensagem que estava faltando.
+  | "SITE_CUSTOMIZATION_UPDATED";
 
 export interface Message<T = any> {
   type: MessageType
@@ -68,19 +69,12 @@ export interface ZenModePreset {
   selectorsToRemove: string[]
 }
 
-// Site customization types
 export interface SiteCustomization {
-  [domain: string]: {
-    [key: string]: boolean
-  }
+    [domain: string]: {
+        selectorsToRemove: string[];
+    };
 }
 
-export interface YouTubeCustomization {
-  hideHomepage: boolean
-  hideShorts: boolean
-  hideComments: boolean
-  hideRecommendations: boolean
-}
 
 // App state
 export interface AppState {
@@ -119,3 +113,4 @@ export interface FirebaseDailySummary {
     time: number
   }>
 }
+

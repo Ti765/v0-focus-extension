@@ -1,6 +1,6 @@
 import { STORAGE_KEYS, CONTENT_ANALYSIS_THRESHOLD } from "../../shared/constants"
 import type { ContentAnalysisResult } from "../../shared/types"
-import { chrome } from "chrome"
+// A linha 'import { chrome } from "chrome"' foi removida daqui.
 
 export async function initializeContentAnalyzer() {
   console.log("[v0] Initializing content analyzer module")

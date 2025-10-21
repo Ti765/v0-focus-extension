@@ -1,5 +1,5 @@
 import { STORAGE_KEYS, ALARM_NAMES } from "../../shared/constants"
-import { chrome } from "chrome-extension-global"
+// A linha 'import { chrome } from "chrome-extension-global"' foi removida daqui.
 
 // Firebase sync module (optional, requires user consent)
 export async function initializeFirebaseSync() {

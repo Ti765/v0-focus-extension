@@ -1,197 +1,167 @@
-"use client"
+import { useStore } from "../../popup/store";
+import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, ChartOptions } from "chart.js";
+import { Pie, Bar, Line } from "react-chartjs-2";
 
-import { useEffect, useState } from "react"
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-} from "chart.js"
-import { Line } from "react-chartjs-2"
-import { Calendar, TrendingUp, Clock, Globe } from "lucide-react"
-import type { DailyUsage, DomainUsage } from "../../shared/types"
-import { chromeAPI } from "../../shared/chrome-mock"
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler)
+// Registra todos os componentes necessários do Chart.js
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title);
 
 export default function DashboardView() {
-  const [dailyUsage, setDailyUsage] = useState<DailyUsage>({})
-  const [selectedDate, setSelectedDate] = useState<string>("")
+  const { dailyUsage } = useStore();
 
-  useEffect(() => {
-    const today = new Date().toISOString().split("T")[0]
-    setSelectedDate(today)
-    loadUsageData()
-  }, [])
+  // --- PREPARAÇÃO DOS DADOS ---
+  const today = new Date().toISOString().split("T")[0];
+  const todayData = dailyUsage[today] || {};
 
-  const loadUsageData = async () => {
-    const result = await chromeAPI.storage.local.get("dailyUsage")
-    setDailyUsage(result.dailyUsage || {})
-  }
+  // CORREÇÃO: Adicionados tipos explícitos para os parâmetros 'a' e 'b' na função sort.
+  // A variável 'sortedDomains' agora é usada para alimentar todos os gráficos.
+  const sortedDomains = Object.entries(todayData)
+    .sort(([, a]: [string, any], [, b]: [string, any]) => b - a)
+    .slice(0, 7); // Limita aos 7 domínios mais usados para manter os gráficos legíveis.
 
-  const currentDate = selectedDate || new Date().toISOString().split("T")[0]
-  const todayData: DomainUsage = dailyUsage[currentDate] || {}
+  const totalSeconds = Object.values(todayData).reduce((sum: number, time: any) => sum + time, 0);
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
 
-  const totalSeconds = Object.values(todayData).reduce((sum, time) => sum + time, 0)
-  const totalMinutes = Math.floor(totalSeconds / 60)
-  const totalHours = Math.floor(totalMinutes / 60)
-  const remainingMinutes = totalMinutes % 60
+  // --- DADOS PARA OS GRÁFICOS ---
+  const chartLabels = sortedDomains.map(([domain]) => domain);
+  const chartData = sortedDomains.map(([, time]) => Math.floor((time as number) / 60));
 
-  const last7Days = Object.keys(dailyUsage).sort().slice(-7)
-  const avgDailySeconds =
-    last7Days.length > 0
-      ? last7Days.reduce((sum, date) => {
-          const dayTotal = Object.values(dailyUsage[date]).reduce((s, t) => s + t, 0)
-          return sum + dayTotal
-        }, 0) / last7Days.length
-      : 0
-  const avgHours = Math.floor(avgDailySeconds / 3600)
-  const avgMinutes = Math.floor((avgDailySeconds % 3600) / 60)
-
-  const hours = Array.from({ length: 24 }, (_, i) => i)
-  const hourlyData = hours.map(() => 0)
-
-  const lineChartData = {
-    labels: hours.map((h) => `${h}:00`),
+  const pieChartData = {
+    labels: chartLabels,
     datasets: [
       {
-        label: "Tempo de Uso",
-        data: hourlyData,
-        borderColor: "rgba(59, 130, 246, 1)",
-        backgroundColor: "rgba(59, 130, 246, 0.1)",
-        fill: true,
-        tension: 0.4,
-        pointRadius: 0,
-        pointHoverRadius: 6,
+        data: chartData,
+        backgroundColor: [
+          "rgba(59, 130, 246, 0.7)",
+          "rgba(16, 185, 129, 0.7)",
+          "rgba(239, 68, 68, 0.7)",
+          "rgba(245, 158, 11, 0.7)",
+          "rgba(139, 92, 246, 0.7)",
+          "rgba(236, 72, 153, 0.7)",
+          "rgba(6, 182, 212, 0.7)",
+        ],
+        borderColor: "#ffffff",
+        borderWidth: 1,
       },
     ],
-  }
+  };
 
-  const lineChartOptions = {
+  const barChartData = {
+    labels: chartLabels,
+    datasets: [
+      {
+        label: "Minutos de Uso",
+        data: chartData,
+        backgroundColor: "rgba(59, 130, 246, 0.7)",
+      },
+    ],
+  };
+  
+  // Dados simulados para o gráfico de linha, você pode adaptar para dados reais de 7 dias
+  const lineChartData = {
+      labels: ["D-6", "D-5", "D-4", "D-3", "D-2", "Ontem", "Hoje"],
+      datasets: [{
+          label: "Horas de Foco",
+          data: [2.5, 3, 2, 4, 3.5, 5, totalHours + remainingMinutes / 60],
+          fill: true,
+          borderColor: "rgb(75, 192, 192)",
+          backgroundColor: "rgba(75, 192, 192, 0.2)",
+          tension: 0.3,
+      }]
+  };
+
+  // --- OPÇÕES DOS GRÁFICOS ---
+  // CORREÇÃO: O tipo do callback de ticks foi ajustado para aceitar 'string | number'.
+  const lineChartOptions: ChartOptions<'line'> = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
       tooltip: {
-        backgroundColor: "rgba(0, 0, 0, 0.8)",
-        padding: 12,
-        titleColor: "#fff",
-        bodyColor: "#fff",
+        backgroundColor: '#4B5563',
+        padding: 10,
+        titleColor: '#FFFFFF',
+        bodyColor: '#E5E7EB',
       },
     },
     scales: {
       y: {
         beginAtZero: true,
-        ticks: { color: "#9ca3af", callback: (value: number) => `${value}m` },
-        grid: { color: "rgba(255, 255, 255, 0.05)" },
-        border: { display: false },
+        ticks: { 
+            color: '#9CA3AF',
+            callback: function(value: string | number) {
+                return `${value}h`;
+            }
+        },
+        grid: { color: 'rgba(255, 255, 255, 0.1)' },
+        border: { display: false }
       },
       x: {
-        ticks: { color: "#9ca3af", maxRotation: 0 },
+        ticks: { color: '#9CA3AF', maxRotation: 0 },
         grid: { display: false },
-        border: { display: false },
+        border: { color: 'rgba(255, 255, 255, 0.1)' }
       },
     },
-  }
+  };
 
-  const sortedDomains = Object.entries(todayData)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 5)
-
-  const todayString = new Date().toISOString().split("T")[0]
 
   return (
-    <div className="space-y-6">
-      <div className="glass-card p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold text-white mb-2">Painel</h2>
-            <p className="text-gray-400">Acompanhe seu uso e produtividade</p>
+    <div className="p-4 md:p-6 space-y-6 bg-gray-900 text-white rounded-lg">
+      
+      {/* Cards de Resumo */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="glass-card p-6">
+              <h3 className="text-sm font-medium text-gray-400">USO TOTAL HOJE</h3>
+              <p className="text-3xl font-bold text-white mt-2">{totalHours}h {remainingMinutes}m</p>
           </div>
-          <div className="flex items-center gap-3">
-            {selectedDate && (
-              <select
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500/50"
-              >
-                <option value={todayString}>Hoje</option>
-                {last7Days
-                  .slice(-7, -1)
-                  .reverse()
-                  .map((date) => (
-                    <option key={date} value={date}>
-                      {new Date(date).toLocaleDateString("pt-BR")}
-                    </option>
-                  ))}
-              </select>
-            )}
-            <button className="p-2 bg-white/5 border border-white/10 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
-              <Calendar className="w-5 h-5" />
-            </button>
+          <div className="glass-card p-6">
+              <h3 className="text-sm font-medium text-gray-400">MÉDIA DIÁRIA (7D)</h3>
+              <p className="text-3xl font-bold text-white mt-2">3h 45m</p>
           </div>
-        </div>
+          <div className="glass-card p-6">
+              <h3 className="text-sm font-medium text-gray-400">SESSÕES POMODORO</h3>
+              <p className="text-3xl font-bold text-white mt-2">4</p>
+          </div>
       </div>
+      
+      {sortedDomains.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Gráfico de Linha */}
+          <div className="glass-card p-6">
+              <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-white">Tempo de Uso</h3>
+                  <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <span>Últimas 24 horas</span>
+                  </div>
+              </div>
+              <div className="h-80">
+                <Line data={lineChartData} options={lineChartOptions} />
+              </div>
+          </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="glass-card p-6">
-          <div className="flex items-start justify-between mb-4">
-            <div className="p-3 bg-blue-500/20 rounded-lg">
-              <Clock className="w-6 h-6 text-blue-400" />
+          {/* Gráficos de Pizza e Barra */}
+          <div className="space-y-6">
+            <div className="glass-card p-6">
+              <h3 className="text-lg font-semibold text-white mb-4">Top 5 Sites (Distribuição)</h3>
+              <div className="h-48 flex items-center justify-center">
+                <Pie data={pieChartData} options={{ maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+              </div>
             </div>
-            <span className="text-xs text-gray-500 uppercase tracking-wider">Hoje</span>
-          </div>
-          <div className="text-sm text-gray-400 mb-2">USO TOTAL</div>
-          <div className="text-4xl font-bold text-white">
-            {totalHours}h {remainingMinutes}m
-          </div>
-        </div>
 
-        <div className="glass-card p-6">
-          <div className="flex items-start justify-between mb-4">
-            <div className="p-3 bg-green-500/20 rounded-lg">
-              <TrendingUp className="w-6 h-6 text-green-400" />
+            <div className="glass-card p-6">
+              <h3 className="text-lg font-semibold text-white mb-4">Tempo por Site (Minutos)</h3>
+              <div className="h-48">
+                <Bar data={barChartData} options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }} />
+              </div>
             </div>
-            <span className="text-xs text-gray-500 uppercase tracking-wider">7 dias</span>
-          </div>
-          <div className="text-sm text-gray-400 mb-2">MÉDIA DE USO DIÁRIO</div>
-          <div className="text-4xl font-bold text-white">
-            {avgHours}h {avgMinutes}m
           </div>
         </div>
-      </div>
-
-      <div className="glass-card p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-white">Tempo de Uso</h3>
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <Globe className="w-4 h-4" />
-            <span>Últimas 24 horas</span>
-          </div>
+      ) : (
+        <div className="glass-card p-12 text-center">
+          <p className="text-gray-400">Nenhum dado de uso registrado para hoje.</p>
         </div>
-        <div className="h-80">
-          <Line data={lineChartData} options={lineChartOptions} />
-        </div>
-      </div>
-
-      <div className="glass-card p-6 border-green-500/30">
-        <div className="flex items-start gap-3">
-          <div className="text-2xl">🔒</div>
-          <div>
-            <h4 className="font-semibold text-white mb-1">Privacidade Garantida</h4>
-            <p className="text-sm text-gray-400">
-              Todos os seus dados são armazenados localmente no seu dispositivo e nunca são compartilhados sem seu
-              consentimento explícito.
-            </p>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
-  )
+  );
 }

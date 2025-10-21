@@ -1,6 +1,5 @@
 import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/constants"
 import type { TimeLimitEntry } from "../../shared/types"
-import chrome from "chrome" // Declare the chrome variable
 
 let activeTabUrl: string | null = null
 let activeTabStartTime: number | null = null
@@ -26,7 +25,8 @@ export async function initializeUsageTracker() {
     startTrackingTab(tab.url)
   })
 
-  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // O parâmetro 'tab' foi removido pois não estava sendo utilizado, corrigindo o aviso.
+  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (changeInfo.url) {
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (activeTab?.id === tabId) {
@@ -148,3 +148,4 @@ function extractDomain(url: string): string {
     return url
   }
 }
+
