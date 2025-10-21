@@ -7,20 +7,18 @@ import { handleMessage } from "./modules/message-handler"
 import { STORAGE_KEYS, DEFAULT_SETTINGS, DEFAULT_POMODORO_CONFIG } from "../shared/constants"
 import type { AppState, PomodoroStatus } from "../shared/types"
 
-// CORREÇÃO: Removido o 'declare const chrome' que estava causando conflitos.
-// O tsconfig.json já carrega os tipos corretos para a API do Chrome.
-
 // Service Worker initialization
 chrome.runtime.onInstalled.addListener(async (details: chrome.runtime.InstalledDetails) => {
   console.log("[v0] Extension installed/updated:", details.reason)
 
   // Initialize default state on first install
   if (details.reason === "install") {
+    // CORREÇÃO: Removido 'zenModePresets' e adicionado 'siteCustomizations' para corresponder ao tipo AppState.
     const initialState: Partial<AppState> = {
       blacklist: [],
       timeLimits: [],
       dailyUsage: {},
-      zenModePresets: [],
+      siteCustomizations: {}, // Corrigido
       settings: DEFAULT_SETTINGS,
     }
 
@@ -35,7 +33,8 @@ chrome.runtime.onInstalled.addListener(async (details: chrome.runtime.InstalledD
       [STORAGE_KEYS.BLACKLIST]: initialState.blacklist,
       [STORAGE_KEYS.TIME_LIMITS]: initialState.timeLimits,
       [STORAGE_KEYS.DAILY_USAGE]: initialState.dailyUsage,
-      [STORAGE_KEYS.ZEN_MODE_PRESETS]: initialState.zenModePresets,
+      // CORREÇÃO: Usando a chave correta 'SITE_CUSTOMIZATIONS'.
+      [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: initialState.siteCustomizations,
       [STORAGE_KEYS.POMODORO_STATUS]: initialPomodoroStatus,
     })
 
@@ -67,7 +66,6 @@ chrome.runtime.onStartup.addListener(async () => {
 })
 
 // Message handling - central communication hub
-// CORREÇÃO: Adicionados os tipos corretos para os parâmetros do listener.
 chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   console.log("[v0] Message received:", message.type, message.payload)
 

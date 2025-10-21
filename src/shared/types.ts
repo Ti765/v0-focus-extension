@@ -10,7 +10,6 @@ export type MessageType =
   | "TOGGLE_ZEN_MODE"
   | "SET_TIME_LIMIT"
   | "UPDATE_SETTINGS"
-  // CORREÇÃO: Adicionado o novo tipo de mensagem que estava faltando.
   | "SITE_CUSTOMIZATION_UPDATED";
 
 export interface Message<T = any> {
@@ -26,7 +25,8 @@ export interface PomodoroConfig {
   breakMinutes: number
   longBreakMinutes: number
   cyclesBeforeLongBreak: number
-  adaptiveMode: boolean
+  adaptiveMode: boolean;
+  notificationsEnabled?: boolean; // Adicionado para consistência
 }
 
 export interface PomodoroStatus {
@@ -63,12 +63,7 @@ export interface ContentAnalysisResult {
   timestamp: number
 }
 
-// Zen mode
-export interface ZenModePreset {
-  domain: string
-  selectorsToRemove: string[]
-}
-
+// Site Customization (Zen Mode)
 export interface SiteCustomization {
     [domain: string]: {
         selectorsToRemove: string[];
@@ -82,9 +77,8 @@ export interface AppState {
   timeLimits: TimeLimitEntry[]
   dailyUsage: DailyUsage
   pomodoro: PomodoroStatus
-  zenModePresets: ZenModePreset[]
+  siteCustomizations: SiteCustomization // Unificado
   settings: UserSettings
-  siteCustomizations: SiteCustomization
 }
 
 export interface UserSettings {
@@ -113,4 +107,3 @@ export interface FirebaseDailySummary {
     time: number
   }>
 }
-

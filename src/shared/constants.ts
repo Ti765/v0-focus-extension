@@ -4,7 +4,7 @@ export const STORAGE_KEYS = {
   TIME_LIMITS: "timeLimits",
   DAILY_USAGE: "dailyUsage",
   POMODORO_STATUS: "pomodoroStatus",
-  ZEN_MODE_PRESETS: "zenModePresets",
+  SITE_CUSTOMIZATIONS: "siteCustomizations", // Renomeado de ZEN_MODE_PRESETS
   SETTINGS: "settings",
 } as const;
 
@@ -44,4 +44,3 @@ export const MAX_TEXT_LENGTH = 10000; // Analisar os primeiros 10000 caracteres
 
 // Intervalo do rastreador de uso em minutos
 export const USAGE_TRACKER_INTERVAL = 0.5; // 30 segundos
-

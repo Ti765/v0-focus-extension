@@ -28,15 +28,13 @@ export const useStore = create<PopupStore>((set, get) => ({
       adaptiveMode: false,
     },
   },
-  zenModePresets: [],
+  siteCustomizations: {},
   settings: {
     analyticsConsent: false,
     productiveKeywords: [],
     distractingKeywords: [],
     notificationsEnabled: true,
   },
-  // CORREÇÃO: Adicionado o campo 'siteCustomizations' que estava faltando no estado inicial.
-  siteCustomizations: {},
   isLoading: true,
 
   // Actions
@@ -46,14 +44,13 @@ export const useStore = create<PopupStore>((set, get) => ({
         type: "GET_INITIAL_STATE",
       } as Message)
 
-      if (response) {
+      if (response && !response.error) {
         set({
           ...response,
           isLoading: false,
         })
       } else {
-        // Lida com o caso de a resposta ser undefined, talvez por erro na comunicação
-        console.error("[v0] Failed to get initial state, response was empty.");
+        console.error("[v0] Failed to get initial state:", response?.error);
         set({ isLoading: false });
       }
     } catch (error) {
@@ -67,8 +64,6 @@ export const useStore = create<PopupStore>((set, get) => ({
       type: "ADD_TO_BLACKLIST",
       payload: { domain },
     } as Message)
-
-    // Reload state
     await get().loadState()
   },
 
@@ -77,8 +72,6 @@ export const useStore = create<PopupStore>((set, get) => ({
       type: "REMOVE_FROM_BLACKLIST",
       payload: { domain },
     } as Message)
-
-    // Reload state
     await get().loadState()
   },
 
@@ -87,8 +80,6 @@ export const useStore = create<PopupStore>((set, get) => ({
       type: "START_POMODORO",
       payload: { focusMinutes, breakMinutes },
     } as Message)
-
-    // Reload state
     await get().loadState()
   },
 
@@ -96,8 +87,6 @@ export const useStore = create<PopupStore>((set, get) => ({
     await chromeAPI.runtime.sendMessage({
       type: "STOP_POMODORO",
     } as Message)
-
-    // Reload state
     await get().loadState()
   },
 }))
