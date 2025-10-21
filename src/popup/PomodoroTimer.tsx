@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useStore } from "../store";
+import { useStore } from "./store"; // Corrigido o caminho
 import { Play, Square, Clock } from "lucide-react";
 
 export default function PomodoroTimer() {
@@ -11,10 +11,16 @@ export default function PomodoroTimer() {
   const [displayTime, setDisplayTime] = useState(pomodoro.timeRemaining);
 
   useEffect(() => {
-    if (pomodoro.state === 'IDLE' || !pomodoro.startTime) {
-      // Se estiver inativo, mostre o tempo de foco configurado
+    // Se estiver inativo, mostre o tempo de foco configurado
+    if (pomodoro.state === 'IDLE') {
       setDisplayTime(focusMinutes * 60);
       return;
+    }
+    
+    // Se não houver startTime, não podemos calcular o tempo restante na UI
+    if (!pomodoro.startTime) {
+        setDisplayTime(pomodoro.timeRemaining);
+        return;
     }
 
     // A lógica do timer agora é gerenciada na UI para uma contagem regressiva suave
@@ -22,6 +28,10 @@ export default function PomodoroTimer() {
       const elapsedSeconds = (Date.now() - pomodoro.startTime!) / 1000;
       const remaining = Math.max(0, pomodoro.timeRemaining - elapsedSeconds);
       setDisplayTime(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+      }
     }, 250); // Atualiza 4x por segundo para ser mais preciso
 
     return () => clearInterval(interval);
@@ -111,4 +121,3 @@ export default function PomodoroTimer() {
     </div>
   );
 }
-

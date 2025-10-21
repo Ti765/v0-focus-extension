@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { useStore } from "./store"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, Focus } from "lucide-react"
 import BlacklistManager from "./components/BlacklistManager"
-import PomodoroTimer from "./components/PomodoroTimer"
+import PomodoroTimer from "./PomodoroTimer" // Corrigido o caminho de importação
 import UsageDashboard from "./components/UsageDashboard"
 
 declare const chrome: any
@@ -31,7 +31,7 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full bg-[#0d0d1a]">
+      <div className="flex items-center justify-center h-full min-h-[500px] bg-[#0d0d1a]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-400 mx-auto"></div>
           <p className="mt-4 text-gray-400 text-sm">Carregando...</p>
@@ -44,9 +44,14 @@ export default function App() {
     <div className="w-full h-full min-h-[500px] bg-[#0d0d1a] p-2">
       <div className="glass-card h-full flex flex-col overflow-hidden">
         <div className="p-4 border-b border-white/10 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h1 className="text-lg font-bold text-white">Focus Extension</h1>
-            <p className="text-xs text-gray-400">Acesso Rápido</p>
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-gradient-to-br from-blue-500 to-purple-600 rounded-md">
+                <Focus className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-md font-bold text-white">Focus Extension</h1>
+              <p className="text-xs text-gray-400">Acesso Rápido</p>
+            </div>
           </div>
           <button
             onClick={openDashboard}

@@ -72,12 +72,14 @@ async function handlePomodoroAlarm() {
     await disablePomodoroBlocking();
     await notifyStateUpdate();
 
-    chrome.notifications.create({
-      type: "basic",
-      iconUrl: "icons/icon48.png",
-      title: "Pausa!",
-      message: `Descanse por ${breakMinutes} minutos. Você merece!`,
-    });
+    if (status.config.notificationsEnabled !== false) {
+      chrome.notifications.create({
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Pausa!",
+        message: `Descanse por ${breakMinutes} minutos. Você merece!`,
+      });
+    }
     console.log("[v0] Pomodoro: Focus → Break");
 
   } else if (status.state === "BREAK") {
@@ -90,13 +92,14 @@ async function handlePomodoroAlarm() {
     await chrome.storage.local.set({ [STORAGE_KEYS.POMODORO_STATUS]: idleStatus });
     await notifyStateUpdate();
 
-    chrome.notifications.create({
-      type: "basic",
-      iconUrl: "icons/icon48.png",
-      title: "Ciclo Completo!",
-      message: "Pronto para outra sessão de foco?",
-    });
+    if (status.config.notificationsEnabled !== false) {
+      chrome.notifications.create({
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Ciclo Completo!",
+        message: "Pronto para outra sessão de foco?",
+      });
+    }
     console.log("[v0] Pomodoro: Break → Idle");
   }
 }
-

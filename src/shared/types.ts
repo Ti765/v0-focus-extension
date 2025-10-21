@@ -26,7 +26,7 @@ export interface PomodoroConfig {
   longBreakMinutes: number
   cyclesBeforeLongBreak: number
   adaptiveMode: boolean;
-  notificationsEnabled?: boolean; // Adicionado para consistência
+  notificationsEnabled?: boolean;
 }
 
 export interface PomodoroStatus {
@@ -34,6 +34,7 @@ export interface PomodoroStatus {
   timeRemaining: number
   currentCycle: number
   config: PomodoroConfig
+  startTime?: number // Adicionado para rastrear o início da contagem
 }
 
 // Blacklist and time tracking
@@ -77,7 +78,7 @@ export interface AppState {
   timeLimits: TimeLimitEntry[]
   dailyUsage: DailyUsage
   pomodoro: PomodoroStatus
-  siteCustomizations: SiteCustomization // Unificado
+  siteCustomizations: SiteCustomization
   settings: UserSettings
 }
 

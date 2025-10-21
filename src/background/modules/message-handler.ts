@@ -83,8 +83,16 @@ export async function handleMessage(message: Message, _sender: chrome.runtime.Me
       return { success: true };
       
     case "STATE_UPDATED":
-      console.warn(`[v0] Received a 'STATE_UPDATED' message, which should not happen.`);
+      // Este caso não deve ocorrer vindo de um cliente, mas é bom tratar.
+      console.warn(`[v0] Received a 'STATE_UPDATED' message from a client, which should not happen.`);
       return { success: false, error: "Invalid message type received." };
+
+    // Adicionado o caso TOGGLE_ZEN_MODE que estava faltando
+    case "TOGGLE_ZEN_MODE":
+        // A lógica para o modo Zen seria chamada aqui.
+        // Por enquanto, apenas logamos e retornamos sucesso.
+        console.log("Toggling Zen Mode with payload:", message.payload);
+        return { success: true };
 
     default:
       // Isso garante que todos os tipos de mensagem sejam tratados.
@@ -92,4 +100,3 @@ export async function handleMessage(message: Message, _sender: chrome.runtime.Me
       throw new Error(`Unknown message type: ${exhaustiveCheck}`);
   }
 }
-
