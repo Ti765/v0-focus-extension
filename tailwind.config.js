@@ -1,18 +1,20 @@
 /** @type {import('tailwindcss').Config} */
-const shadcnConfig = require("shadcn/ui/tailwind.config")
-
 module.exports = {
-  ...shadcnConfig,
+  darkMode: ["class"],
   content: [
-    ...shadcnConfig.content,
-    "./public/popup.html",
-    "./src/popup/**/*.{js,ts,jsx,tsx}",
-    "*.{js,ts,jsx,tsx,mdx}",
+    './public/**/*.html', // Garante que popup.html e options.html sejam lidos
+    './src/**/*.{js,ts,jsx,tsx}', // Lê todos os arquivos de componentes e views
   ],
   theme: {
-    ...shadcnConfig.theme,
+    container: {
+      center: true,
+      padding: "2rem",
+      screens: {
+        "2xl": "1400px",
+      },
+    },
     extend: {
-      ...shadcnConfig.theme.extend,
+      // Mantendo suas customizações de cores
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -48,12 +50,28 @@ module.exports = {
           foreground: "hsl(var(--card-foreground))",
         },
       },
+      // Mantendo suas customizações de borda
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      // Adicionando keyframes necessários para componentes shadcn/ui
+      keyframes: {
+        "accordion-down": {
+          from: { height: 0 },
+          to: { height: "var(--radix-accordion-content-height)" },
+        },
+        "accordion-up": {
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: 0 },
+        },
+      },
+      animation: {
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
+      },
     },
   },
-  plugins: [...shadcnConfig.plugins, require("tailwindcss-animate")],
-}
+  plugins: [require("tailwindcss-animate")],
+};
