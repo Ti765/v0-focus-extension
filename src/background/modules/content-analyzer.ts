@@ -1,5 +1,7 @@
 import { STORAGE_KEYS, CONTENT_ANALYSIS_THRESHOLD } from "../../shared/constants"
 import type { ContentAnalysisResult } from "../../shared/types"
+import { extractDomain } from "../../shared/url"
+import { notificationsAllowed } from "./message-handler"
 // A linha 'import { chrome } from "chrome"' foi removida daqui.
 
 export async function initializeContentAnalyzer() {
@@ -24,21 +26,16 @@ export async function handleContentAnalysisResult(result: ContentAnalysisResult)
     if (alreadyBlocked) return
 
     // Show notification suggesting to block
-    chrome.notifications.create({
-      type: "basic",
-      iconUrl: "icons/icon48.png",
-      title: "Site Potencialmente Distrativo",
-      message: `${domain} parece ser distrativo. Deseja adicioná-lo à sua lista de bloqueio?`,
-      buttons: [{ title: "Sim, bloquear" }, { title: "Não, obrigado" }],
-    })
+    if (await notificationsAllowed()) {
+      chrome.notifications.create(`suggest-block-${domain}`, {
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Site Potencialmente Distrativo",
+        message: `${domain} parece ser distrativo. Deseja adicioná-lo à sua lista de bloqueio?`,
+        buttons: [{ title: "Sim, bloquear" }, { title: "Não, obrigado" }],
+      })
+    }
   }
 }
 
-function extractDomain(url: string): string {
-  try {
-    const urlObj = new URL(url)
-    return urlObj.hostname
-  } catch {
-    return url
-  }
-}
+// extractDomain moved to shared/url

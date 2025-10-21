@@ -9,6 +9,7 @@ import { initializeFirebaseSync } from "./modules/firebase-sync";
 import { handleMessage } from "./modules/message-handler";
 import { STORAGE_KEYS, DEFAULT_SETTINGS, DEFAULT_POMODORO_CONFIG } from "../shared/constants";
 import type { AppState, PomodoroStatus } from "../shared/types";
+import { initializeDailySync } from "./modules/usage-tracker";
 
 // Service Worker initialization
 chrome.runtime.onInstalled.addListener(async (details: chrome.runtime.InstalledDetails) => {
@@ -50,6 +51,7 @@ chrome.runtime.onInstalled.addListener(async (details: chrome.runtime.InstalledD
   await initializePomodoro();
   await initializeBlocker();
   await initializeUsageTracker();
+  await initializeDailySync();
   await initializeContentAnalyzer();
   await initializeFirebaseSync();
 });
@@ -62,6 +64,7 @@ chrome.runtime.onStartup.addListener(async () => {
   await initializePomodoro();
   await initializeBlocker();
   await initializeUsageTracker();
+  await initializeDailySync();
   await initializeContentAnalyzer();
   await initializeFirebaseSync();
 });

@@ -4,9 +4,13 @@ export const STORAGE_KEYS = {
   TIME_LIMITS: "timeLimits",
   DAILY_USAGE: "dailyUsage",
   POMODORO_STATUS: "pomodoroStatus",
-  SITE_CUSTOMIZATIONS: "siteCustomizations", // Renomeado de ZEN_MODE_PRESETS
+  SITE_CUSTOMIZATIONS: "siteCustomizations",
   SETTINGS: "settings",
+  CURRENTLY_TRACKING: "currentlyTracking", // Chave para persistir a aba ativa na sessão
 } as const;
+
+// SUGESTÃO APLICADA: Exporta o tipo de chave para utilitários genéricos.
+export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];
 
 // Nomes dos alarmes para o chrome.alarms
 export const ALARM_NAMES = {
@@ -43,4 +47,4 @@ export const CONTENT_ANALYSIS_THRESHOLD = 0.5; // Limite de 50% para considerar 
 export const MAX_TEXT_LENGTH = 10000; // Analisar os primeiros 10000 caracteres
 
 // Intervalo do rastreador de uso em minutos
-export const USAGE_TRACKER_INTERVAL = 0.5; // 30 segundos
+export const USAGE_TRACKER_INTERVAL = 1;

@@ -1,17 +1,48 @@
 import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/constants";
 import type { TimeLimitEntry } from "../../shared/types";
-import { notifyStateUpdate } from "./message-handler";
+import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
+import { normalizeDomain, extractDomain } from "../../shared/url";
 
-let activeTabUrl: string | null = null;
-let activeTabStartTime: number | null = null;
 let activeTabId: number | null = null;
+// CORREÇÃO: Adicionado guard para evitar múltiplos listeners.
+let usageInitialized = false;
+const LIMIT_RULE_BASE = 3000;
+let dailySyncInitialized = false;
+
+export async function initializeDailySync() {
+  if (dailySyncInitialized) return;
+  dailySyncInitialized = true;
+
+  await chrome.alarms.clear(ALARM_NAMES.DAILY_SYNC);
+  const minutesInDay = 60 * 24;
+  await chrome.alarms.create(ALARM_NAMES.DAILY_SYNC, { periodInMinutes: minutesInDay });
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name !== ALARM_NAMES.DAILY_SYNC) return;
+    await clearAllTimeLimitSessionRules();
+    // Optional: compact daily usage here if desired
+  });
+}
+
+async function clearAllTimeLimitSessionRules() {
+  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS);
+  if (!timeLimits || timeLimits.length === 0) return;
+  const ids = timeLimits.map((e: TimeLimitEntry) =>
+    e.domain.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), LIMIT_RULE_BASE)
+  );
+  if (ids.length) {
+    await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids });
+  }
+}
+
+// normalizeDomain and extractDomain are now imported from shared/url
 
 export async function initializeUsageTracker() {
+  if (usageInitialized) return;
+  usageInitialized = true;
+
   console.log("[v0] Initializing usage tracker module");
 
-  // Limpa alarmes antigos para garantir um estado limpo
   await chrome.alarms.clear(ALARM_NAMES.USAGE_TRACKER);
-  // Cria o alarme que irá periodicamente gravar o tempo de uso
   await chrome.alarms.create(ALARM_NAMES.USAGE_TRACKER, {
     periodInMinutes: USAGE_TRACKER_INTERVAL,
   });
@@ -22,77 +53,78 @@ export async function initializeUsageTracker() {
     }
   });
 
-  // Ouve a troca de abas
-  chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    await recordActiveTabUsage(); // Grava o tempo da aba anterior
-    try {
-        const tab = await chrome.tabs.get(activeInfo.tabId);
-        startTrackingTab(tab.id, tab.url);
-    } catch (e) {
-        console.warn(`Could not get tab info for tabId: ${activeInfo.tabId}`);
-        stopTracking();
-    }
-  });
+  chrome.tabs.onActivated.addListener(handleTabActivation);
+  chrome.tabs.onUpdated.addListener(handleTabUpdate);
+  chrome.windows.onFocusChanged.addListener(handleWindowFocusChange);
 
-  // Ouve atualizações na URL da aba
-  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-    // Apenas se a URL mudou na aba ativa
-    if (tabId === activeTabId && changeInfo.url) {
-        await recordActiveTabUsage(); // Grava o tempo da URL anterior
-        startTrackingTab(tab.id, tab.url);
-    }
-  });
-  
-  // Ouve quando uma janela ganha foco
-  chrome.windows.onFocusChanged.addListener(async (windowId) => {
-    if (windowId === chrome.windows.WINDOW_ID_NONE) {
-      // O navegador perdeu o foco
-      await recordActiveTabUsage();
-      stopTracking();
-    } else {
-      // O navegador ganhou foco, encontra a aba ativa
-      const [activeTab] = await chrome.tabs.query({ active: true, windowId: windowId });
-      if (activeTab) {
-        startTrackingTab(activeTab.id, activeTab.url);
-      }
-    }
-  });
+  await restoreTracking();
+}
 
-  // Inicia o rastreamento para a aba ativa no momento da inicialização
+async function handleTabActivation(activeInfo: chrome.tabs.TabActiveInfo) {
+  await recordActiveTabUsage();
   try {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id && activeTab.url) {
-        startTrackingTab(activeTab.id, activeTab.url);
-    }
-  } catch(e) {
-    console.warn(`Could not query for active tab on startup: ${e}`);
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    await startTrackingTab(tab.id, tab.url);
+  } catch (e) {
+    console.warn(`[v0] Could not get tab info for tabId: ${activeInfo.tabId}`);
+    await stopTracking();
   }
 }
 
-function startTrackingTab(tabId: number | undefined, url: string | undefined) {
+async function handleTabUpdate(tabId: number, changeInfo: chrome.tabs.TabChangeInfo) {
+  if (tabId === activeTabId && changeInfo.url) {
+    await recordActiveTabUsage();
+    await startTrackingTab(tabId, changeInfo.url);
+  }
+}
+
+async function handleWindowFocusChange(windowId: number) {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    await recordActiveTabUsage();
+    await stopTracking();
+  } else {
+    await restoreTracking();
+  }
+}
+
+async function restoreTracking() {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab?.id && activeTab.url) {
+        await startTrackingTab(activeTab.id, activeTab.url);
+    }
+}
+
+async function startTrackingTab(tabId: number | undefined, url: string | undefined) {
   if (!tabId || !url || url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("about:")) {
-    stopTracking();
+    await stopTracking();
     return;
   }
   activeTabId = tabId;
-  activeTabUrl = url;
-  activeTabStartTime = Date.now();
+  const trackingInfo = {
+    url,
+    startTime: Date.now(),
+  };
+  await chrome.storage.session.set({ [STORAGE_KEYS.CURRENTLY_TRACKING]: trackingInfo });
 }
 
-function stopTracking() {
+async function stopTracking() {
     activeTabId = null;
-    activeTabUrl = null;
-    activeTabStartTime = null;
+    await chrome.storage.session.remove(STORAGE_KEYS.CURRENTLY_TRACKING);
 }
 
 async function recordActiveTabUsage() {
-  if (!activeTabUrl || !activeTabStartTime) return;
+  const result = await chrome.storage.session.get(STORAGE_KEYS.CURRENTLY_TRACKING);
+  const trackingInfo = result[STORAGE_KEYS.CURRENTLY_TRACKING];
+  
+  if (!trackingInfo || !trackingInfo.url || !trackingInfo.startTime) return;
 
-  const domain = extractDomain(activeTabUrl);
-  const timeSpent = Math.floor((Date.now() - activeTabStartTime) / 1000);
+  const domain = extractDomain(trackingInfo.url);
+  const timeSpent = Math.floor((Date.now() - trackingInfo.startTime) / 1000);
 
-  if (timeSpent < 1) { // Não grava se for menos de 1 segundo
-    activeTabStartTime = Date.now(); // Reinicia o contador
+  trackingInfo.startTime = Date.now();
+  await chrome.storage.session.set({ [STORAGE_KEYS.CURRENTLY_TRACKING]: trackingInfo });
+
+  if (timeSpent < 1) {
     return;
   }
 
@@ -108,12 +140,9 @@ async function recordActiveTabUsage() {
   
   console.log("[v0] Recorded usage:", domain, timeSpent, "seconds");
   
-  await notifyStateUpdate(); // Notifica a UI que os dados de uso foram atualizados
+  await notifyStateUpdate();
 
   await checkTimeLimit(domain, dailyUsage[today][domain]);
-
-  // Reseta o tempo de início para a próxima gravação
-  activeTabStartTime = Date.now();
 }
 
 async function checkTimeLimit(domain: string, totalSeconds: number) {
@@ -124,64 +153,57 @@ async function checkTimeLimit(domain: string, totalSeconds: number) {
 
   const limitSeconds = limit.limitMinutes * 60;
   if (totalSeconds >= limitSeconds) {
-    // Usar um ID de regra consistente para que possamos removê-lo se o limite for alterado
-    const ruleId = domain.split('').reduce((acc, char) => acc + char.charCodeAt(0), 3000); 
+  const ruleId = domain.split('').reduce((acc, char) => acc + char.charCodeAt(0), LIMIT_RULE_BASE); 
     
     await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [ruleId], 
       addRules: [{
         id: ruleId,
-        priority: 2,
+        priority: 3, 
         action: { type: "block" as chrome.declarativeNetRequest.RuleActionType },
         condition: {
           urlFilter: `||${domain}`,
-          resourceTypes: ["main_frame" as chrome.declarativeNetRequest.ResourceType],
+          resourceTypes: [ "main_frame" as chrome.declarativeNetRequest.ResourceType],
         },
       }],
-      // Se a regra já existir, ela será substituída. Se não, será adicionada.
-      // Se quisermos garantir a remoção antes, podemos adicionar `removeRuleIds: [ruleId]`
     });
 
-    chrome.notifications.create(`limit-exceeded-${domain}`, {
-      type: "basic",
-      iconUrl: "icons/icon48.png",
-      title: "Limite de Tempo Atingido",
-      message: `Você atingiu o limite de ${limit.limitMinutes} minutos em ${domain} hoje.`,
-    });
+    if (await notificationsAllowed()) {
+      chrome.notifications.create(`limit-exceeded-${domain}`, {
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Limite de Tempo Atingido",
+        message: `Você atingiu o limite de ${limit.limitMinutes} minutos em ${domain} hoje.`,
+      });
+    }
     console.log(`[v0] Limite de tempo atingido para: ${domain}. Regra de sessão adicionada.`);
   }
 }
 
 export async function setTimeLimit(domain: string, limitMinutes: number) {
+  // CORREÇÃO: Normaliza o domínio para consistência.
+  const normalizedDomain = normalizeDomain(domain);
   const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS);
 
-  const existingIndex = timeLimits.findIndex((entry: TimeLimitEntry) => entry.domain === domain);
+  const existingIndex = timeLimits.findIndex((entry: TimeLimitEntry) => entry.domain === normalizedDomain);
+  
   if (limitMinutes > 0) {
     if (existingIndex >= 0) {
         timeLimits[existingIndex].limitMinutes = limitMinutes;
       } else {
-        timeLimits.push({ domain, limitMinutes });
+        timeLimits.push({ domain: normalizedDomain, limitMinutes });
       }
-  } else { // Remove o limite se for 0 ou menos
+  } else { 
       if (existingIndex >= 0) {
         timeLimits.splice(existingIndex, 1);
-        // Também remove a regra de bloqueio de sessão se existir
-        const ruleId = domain.split('').reduce((acc, char) => acc + char.charCodeAt(0), 3000);
+  const ruleId = normalizedDomain.split('').reduce((acc, char) => acc + char.charCodeAt(0), LIMIT_RULE_BASE);
         await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
       }
   }
 
-
   await chrome.storage.local.set({ [STORAGE_KEYS.TIME_LIMITS]: timeLimits });
   await notifyStateUpdate();
-  console.log("[v0] Time limit set/updated:", domain, limitMinutes, "minutes");
+  console.log("[v0] Time limit set/updated:", normalizedDomain, limitMinutes, "minutes");
 }
 
-function extractDomain(url: string): string {
-  try {
-    let hostname = new URL(url).hostname;
-    // Remove "www." para agrupar o uso corretamente
-    return hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
+// extractDomain is imported from shared/url
