@@ -9,52 +9,51 @@ import SettingsView from "./views/SettingsView"
 
 type View = "dashboard" | "time-limits" | "site-blocking" | "settings"
 
+const navItems = [
+  { id: "dashboard" as View, label: "Painel", icon: BarChart3 },
+  { id: "time-limits" as View, label: "Limites de Uso", icon: Clock },
+  { id: "site-blocking" as View, label: "Bloqueio de Sites", icon: Shield },
+  { id: "settings" as View, label: "Configurações", icon: Settings },
+]
+
+function renderView(activeView: View) {
+  switch (activeView) {
+    case "dashboard":
+      return <DashboardView />
+    case "time-limits":
+      return <TimeLimitsView />
+    case "site-blocking":
+      return <SiteBlockingView />
+    case "settings":
+      return <SettingsView />
+    default:
+      return <DashboardView />
+  }
+}
+
 export default function OptionsApp() {
   const [activeView, setActiveView] = useState<View>("dashboard")
 
-  const navItems = [
-    { id: "dashboard" as View, label: "Painel", icon: BarChart3 },
-    { id: "time-limits" as View, label: "Limites de Uso", icon: Clock },
-    { id: "site-blocking" as View, label: "Bloqueio de Sites", icon: Shield },
-    { id: "settings" as View, label: "Configurações", icon: Settings },
-  ]
-
-  const renderView = () => {
-    switch (activeView) {
-      case "dashboard":
-        return <DashboardView />
-      case "time-limits":
-        return <TimeLimitsView />
-      case "site-blocking":
-        return <SiteBlockingView />
-      case "settings":
-        return <SettingsView />
-      default:
-        return <DashboardView />
-    }
-  }
-
   return (
-    <div className="min-h-screen p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex gap-6">
-          <aside className="w-64 flex-shrink-0">
-            <div className="glass-card p-6 sticky top-6 flex flex-col" style={{ minHeight: "calc(100vh - 3rem)" }}>
-              {/* Logo and Brand */}
+    <div className="min-h-screen p-4 md:p-6 bg-[#0d0d1a] text-gray-200">
+      <div className="max-w-screen-2xl mx-auto">
+        <div className="flex flex-col md:flex-row gap-6">
+          <aside className="w-full md:w-64 flex-shrink-0">
+            <div
+              className="glass-card p-4 md:p-6 sticky top-6 flex flex-col h-full"
+              style={{ minHeight: "calc(100vh - 3rem)" }}
+            >
               <div className="mb-8">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg shadow-lg">
                     <Focus className="w-6 h-6 text-white" />
                   </div>
                   <div>
                     <h1 className="text-xl font-bold text-white">Focus</h1>
-                    <p className="text-xs text-gray-400">Extension</p>
                   </div>
                 </div>
-                <div className="h-px bg-gradient-to-r from-white/20 to-transparent"></div>
               </div>
 
-              {/* Navigation */}
               <nav className="space-y-2 flex-1">
                 {navItems.map((item) => {
                   const Icon = item.icon
@@ -64,31 +63,29 @@ export default function OptionsApp() {
                     <button
                       key={item.id}
                       onClick={() => setActiveView(item.id)}
-                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all duration-200 ${
                         isActive
-                          ? "bg-blue-500/20 text-blue-400 border border-blue-500/30 shadow-lg shadow-blue-500/10"
-                          : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
+                          ? "bg-blue-500/20 text-white border border-blue-500/30 shadow-md"
+                          : "text-gray-400 hover:text-white hover:bg-white/5"
                       }`}
                     >
-                      <Icon className="w-5 h-5" />
-                      <span className="font-medium">{item.label}</span>
+                      <Icon className={`w-5 h-5 ${isActive ? "text-blue-300" : ""}`} />
+                      <span className="font-semibold text-sm">{item.label}</span>
                     </button>
                   )
                 })}
               </nav>
 
-              {/* Logout Button */}
               <div className="mt-auto pt-6 border-t border-white/10">
-                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/30">
+                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all">
                   <LogOut className="w-5 h-5" />
-                  <span className="font-medium">Sair</span>
+                  <span className="font-semibold text-sm">Sair</span>
                 </button>
               </div>
             </div>
           </aside>
 
-          {/* Main Content Area */}
-          <main className="flex-1 min-w-0">{renderView()}</main>
+          <main className="flex-1 min-w-0">{renderView(activeView)}</main>
         </div>
       </div>
     </div>

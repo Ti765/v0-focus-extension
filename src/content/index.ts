@@ -6,6 +6,17 @@ import model from "wink-eng-lite-web-model"
 
 declare const chrome: typeof import("chrome-types").chrome
 
+function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+
+  return (...args: Parameters<F>): void => {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+    timeout = setTimeout(() => func(...args), waitFor)
+  }
+}
+
 console.log("[v0] Content script loaded")
 
 // Listen for Zen Mode toggle messages
@@ -173,14 +184,15 @@ function setupMutationObserver() {
   const targetNode = document.body
   const config = { childList: true, subtree: true }
 
-  let debounceTimeout: ReturnType<typeof setTimeout>
+  // Cria uma versão "debounced" da função de reaplicar
+  const debouncedApplyZen = debounce(() => {
+    console.log("[v0] DOM changes detected, reapplying Zen Mode")
+    applyZenMode()
+  }, 750) // Aumenta o tempo de espera para evitar execuções desnecessárias
 
   const callback = (mutationsList: MutationRecord[]) => {
-    clearTimeout(debounceTimeout)
-    debounceTimeout = setTimeout(() => {
-      console.log("[v0] DOM changes detected, reapplying Zen Mode")
-      applyZenMode()
-    }, 500)
+    // Apenas chama a função "debounced"
+    debouncedApplyZen()
   }
 
   observer = new MutationObserver(callback)
@@ -236,13 +248,19 @@ async function applyYouTubeCustomizations() {
   }
 }
 
-// Apply YouTube customizations on load
 if (window.location.hostname.includes("youtube.com")) {
+  // Função debounced para aplicar customizações
+  const debouncedApplyYouTubeCustomizations = debounce(() => {
+    applyYouTubeCustomizations()
+  }, 300)
+
+  // Aplica na primeira carga
   applyYouTubeCustomizations()
 
-  // Reapply on navigation (YouTube is a SPA)
-  const ytObserver = new MutationObserver(() => {
-    applyYouTubeCustomizations()
+  // Observa mudanças no corpo do documento
+  const ytObserver = new MutationObserver((mutations) => {
+    // Dispara a função debounced em qualquer mutação
+    debouncedApplyYouTubeCustomizations()
   })
 
   ytObserver.observe(document.body, {

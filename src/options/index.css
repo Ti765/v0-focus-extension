@@ -11,19 +11,20 @@ body {
     "Droid Sans", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #000000 0%, #0a0a0a 50%, #1a1a1a 100%);
+  background: #0d0d1a; /* Fundo azul-noite muito escuro para melhor contraste */
   min-height: 100vh;
-  color: #ffffff;
+  color: #e0e0e0; /* Texto principal levemente acinzentado */
 }
 
-/* Dark Glassmorphic Card Style */
+/* Efeito Dark Glassmorphic Aprimorado com mais profundidade */
 .glass-card {
-  background: rgba(10, 10, 10, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-  border-radius: 1.25rem;
+  background: rgba(25, 26, 46, 0.6); /* Tom azul-roxo escuro */
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .glass-card-hover {
@@ -36,22 +37,18 @@ body {
   box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5);
 }
 
-/* Scrollbar styling */
+/* Scrollbar com o novo tema */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
-
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  border-radius: 3px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
