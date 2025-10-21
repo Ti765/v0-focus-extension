@@ -1,151 +1,150 @@
-import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/constants"
-import type { TimeLimitEntry } from "../../shared/types"
+import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/constants";
+import type { TimeLimitEntry } from "../../shared/types";
+import { notifyStateUpdate } from "./message-handler";
 
-let activeTabUrl: string | null = null
-let activeTabStartTime: number | null = null
+let activeTabUrl: string | null = null;
+let activeTabStartTime: number | null = null;
 
 export async function initializeUsageTracker() {
-  console.log("[v0] Initializing usage tracker module")
+  console.log("[v0] Initializing usage tracker module");
 
-  // Set up periodic tracking alarm (every 30 seconds)
+  await chrome.alarms.clear(ALARM_NAMES.USAGE_TRACKER);
   await chrome.alarms.create(ALARM_NAMES.USAGE_TRACKER, {
     periodInMinutes: USAGE_TRACKER_INTERVAL,
-  })
+  });
 
   chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === ALARM_NAMES.USAGE_TRACKER) {
-      await recordActiveTabUsage()
+      await recordActiveTabUsage();
     }
-  })
+  });
 
-  // Track tab changes
   chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    await recordActiveTabUsage() // Record time for previous tab
-    const tab = await chrome.tabs.get(activeInfo.tabId)
-    startTrackingTab(tab.url)
-  })
+    await recordActiveTabUsage();
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        startTrackingTab(tab.url);
+    } catch (e) {
+        console.warn(`Could not get tab info for tabId: ${activeInfo.tabId}`);
+        activeTabUrl = null;
+        activeTabStartTime = null;
+    }
+  });
 
-  // O parâmetro 'tab' foi removido pois não estava sendo utilizado, corrigindo o aviso.
   chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (changeInfo.url) {
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (activeTab?.id === tabId) {
-        await recordActiveTabUsage() // Record time for previous URL
-        startTrackingTab(changeInfo.url)
-      }
+        try {
+            const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (activeTab?.id === tabId) {
+                await recordActiveTabUsage();
+                startTrackingTab(changeInfo.url);
+            }
+        } catch(e) {
+            console.warn(`Could not query for active tab: ${e}`);
+        }
     }
-  })
-
-  // Start tracking current active tab
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-  if (activeTab?.url) {
-    startTrackingTab(activeTab.url)
+  });
+  
+  // Inicia o rastreamento para a aba ativa no momento da inicialização
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab?.url) {
+        startTrackingTab(activeTab.url);
+    }
+  } catch(e) {
+    console.warn(`Could not query for active tab on startup: ${e}`);
   }
 }
 
 function startTrackingTab(url: string | undefined) {
   if (!url || url.startsWith("chrome://") || url.startsWith("chrome-extension://")) {
-    activeTabUrl = null
-    activeTabStartTime = null
-    return
+    activeTabUrl = null;
+    activeTabStartTime = null;
+    return;
   }
-
-  activeTabUrl = url
-  activeTabStartTime = Date.now()
-  console.log("[v0] Started tracking:", extractDomain(url))
+  activeTabUrl = url;
+  activeTabStartTime = Date.now();
 }
 
 async function recordActiveTabUsage() {
-  if (!activeTabUrl || !activeTabStartTime) return
+  if (!activeTabUrl || !activeTabStartTime) return;
 
-  const domain = extractDomain(activeTabUrl)
-  const timeSpent = Math.floor((Date.now() - activeTabStartTime) / 1000) // seconds
+  const domain = extractDomain(activeTabUrl);
+  const timeSpent = Math.floor((Date.now() - activeTabStartTime) / 1000);
 
-  if (timeSpent < 1) return // Ignore very short visits
+  if (timeSpent < 1) return;
 
-  const today = new Date().toISOString().split("T")[0] // YYYY-MM-DD
-
-  const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(STORAGE_KEYS.DAILY_USAGE)
+  const today = new Date().toISOString().split("T")[0];
+  const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(STORAGE_KEYS.DAILY_USAGE);
 
   if (!dailyUsage[today]) {
-    dailyUsage[today] = {}
+    dailyUsage[today] = {};
   }
+  dailyUsage[today][domain] = (dailyUsage[today][domain] || 0) + timeSpent;
 
-  dailyUsage[today][domain] = (dailyUsage[today][domain] || 0) + timeSpent
+  await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
+  
+  console.log("[v0] Recorded usage:", domain, timeSpent, "seconds");
+  
+  await notifyStateUpdate(); // Notifica a UI que os dados de uso foram atualizados
 
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.DAILY_USAGE]: dailyUsage,
-  })
+  await checkTimeLimit(domain, dailyUsage[today][domain]);
 
-  console.log("[v0] Recorded usage:", domain, timeSpent, "seconds")
-
-  // Check time limits
-  await checkTimeLimit(domain, dailyUsage[today][domain])
-
-  // Reset start time for continuous tracking
-  activeTabStartTime = Date.now()
+  activeTabStartTime = Date.now();
 }
 
 async function checkTimeLimit(domain: string, totalSeconds: number) {
-  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS)
+  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS);
+  const limit = timeLimits.find((entry: TimeLimitEntry) => entry.domain === domain);
 
-  const limit = timeLimits.find((entry: TimeLimitEntry) => entry.domain === domain)
-  if (!limit) return
+  if (!limit) return;
 
-  const limitSeconds = limit.limitMinutes * 60
-
+  const limitSeconds = limit.limitMinutes * 60;
   if (totalSeconds >= limitSeconds) {
-    const ruleId = Math.floor(Math.random() * Date.now())
-
+    const ruleId = domain.split('').reduce((acc, char) => acc + char.charCodeAt(0), 1000); 
     await chrome.declarativeNetRequest.updateSessionRules({
-      addRules: [
-        {
-          id: ruleId,
-          priority: 2, // High priority to override other rules
-          action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
-          condition: {
-            urlFilter: `||${domain}`,
-            resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-          },
+      addRules: [{
+        id: ruleId,
+        priority: 2,
+        action: { type: "block" as chrome.declarativeNetRequest.RuleActionType },
+        condition: {
+          urlFilter: `||${domain}`,
+          resourceTypes: ["main_frame" as chrome.declarativeNetRequest.ResourceType],
         },
-      ],
-    })
+      }],
+      removeRuleIds: [ruleId]
+    });
 
     chrome.notifications.create({
       type: "basic",
       iconUrl: "icons/icon48.png",
       title: "Limite de Tempo Atingido",
       message: `Você atingiu o limite de ${limit.limitMinutes} minutos em ${domain} hoje.`,
-    })
-
-    console.log(`[v0] Limite de tempo atingido para: ${domain}. Regra de sessão adicionada.`)
+    });
+    console.log(`[v0] Limite de tempo atingido para: ${domain}. Regra de sessão adicionada.`);
   }
 }
 
 export async function setTimeLimit(domain: string, limitMinutes: number) {
-  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS)
+  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS);
 
-  const existingIndex = timeLimits.findIndex((entry: TimeLimitEntry) => entry.domain === domain)
-
+  const existingIndex = timeLimits.findIndex((entry: TimeLimitEntry) => entry.domain === domain);
   if (existingIndex >= 0) {
-    timeLimits[existingIndex].limitMinutes = limitMinutes
+    timeLimits[existingIndex].limitMinutes = limitMinutes;
   } else {
-    timeLimits.push({ domain, limitMinutes })
+    timeLimits.push({ domain, limitMinutes });
   }
 
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.TIME_LIMITS]: timeLimits,
-  })
-
-  console.log("[v0] Time limit set:", domain, limitMinutes, "minutes")
+  await chrome.storage.local.set({ [STORAGE_KEYS.TIME_LIMITS]: timeLimits });
+  await notifyStateUpdate();
+  console.log("[v0] Time limit set:", domain, limitMinutes, "minutes");
 }
 
 function extractDomain(url: string): string {
   try {
-    const urlObj = new URL(url)
-    return urlObj.hostname
+    return new URL(url).hostname;
   } catch {
-    return url
+    return url;
   }
 }
 

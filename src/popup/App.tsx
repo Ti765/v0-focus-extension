@@ -12,12 +12,16 @@ declare const chrome: any
 type Tab = "pomodoro" | "blacklist" | "dashboard"
 
 export default function App() {
-  const { isLoading, loadState } = useStore()
+  const { isLoading, loadState, listenForUpdates } = useStore()
   const [activeTab, setActiveTab] = useState<Tab>("pomodoro")
 
   useEffect(() => {
-    loadState()
-  }, [loadState])
+    loadState();
+    // Inicia o listener para atualizações em tempo real
+    const unsubscribe = listenForUpdates();
+    // Limpa o listener quando o popup for fechado
+    return () => unsubscribe();
+  }, [loadState, listenForUpdates]);
 
   const openDashboard = () => {
     if (typeof chrome !== "undefined" && chrome.tabs) {
