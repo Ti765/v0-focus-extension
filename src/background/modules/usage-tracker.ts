@@ -95,13 +95,13 @@ async function checkTimeLimit(domain: string, totalSeconds: number) {
   const limitSeconds = limit.limitMinutes * 60
 
   if (totalSeconds >= limitSeconds) {
-    // Add session rule to block domain for rest of day
-    const ruleId = Date.now()
+    const ruleId = Math.floor(Math.random() * Date.now())
+
     await chrome.declarativeNetRequest.updateSessionRules({
       addRules: [
         {
           id: ruleId,
-          priority: 2,
+          priority: 2, // High priority to override other rules
           action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
           condition: {
             urlFilter: `||${domain}`,
@@ -109,7 +109,6 @@ async function checkTimeLimit(domain: string, totalSeconds: number) {
           },
         },
       ],
-      removeRuleIds: [],
     })
 
     chrome.notifications.create({
@@ -119,7 +118,7 @@ async function checkTimeLimit(domain: string, totalSeconds: number) {
       message: `Você atingiu o limite de ${limit.limitMinutes} minutos em ${domain} hoje.`,
     })
 
-    console.log("[v0] Time limit reached for:", domain)
+    console.log(`[v0] Limite de tempo atingido para: ${domain}. Regra de sessão adicionada.`)
   }
 }
 

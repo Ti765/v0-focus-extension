@@ -10,6 +10,7 @@ export type MessageType =
   | "TOGGLE_ZEN_MODE"
   | "SET_TIME_LIMIT"
   | "UPDATE_SETTINGS"
+  | "SITE_CUSTOMIZATION_UPDATED"
 
 export interface Message<T = any> {
   type: MessageType
@@ -67,6 +68,20 @@ export interface ZenModePreset {
   selectorsToRemove: string[]
 }
 
+// Site customization types
+export interface SiteCustomization {
+  [domain: string]: {
+    [key: string]: boolean
+  }
+}
+
+export interface YouTubeCustomization {
+  hideHomepage: boolean
+  hideShorts: boolean
+  hideComments: boolean
+  hideRecommendations: boolean
+}
+
 // App state
 export interface AppState {
   blacklist: BlacklistEntry[]
@@ -75,6 +90,7 @@ export interface AppState {
   pomodoro: PomodoroStatus
   zenModePresets: ZenModePreset[]
   settings: UserSettings
+  siteCustomizations: SiteCustomization
 }
 
 export interface UserSettings {

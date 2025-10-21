@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mozilla/readability": "latest",
     "@radix-ui/react-accordion": "latest",
     "@radix-ui/react-alert-dialog": "latest",
     "@radix-ui/react-aspect-ratio": "latest",
@@ -76,8 +77,8 @@
     "tw-animate-css": "latest",
     "use-sync-external-store": "latest",
     "vaul": "latest",
-    "wink-eng-lite-web-model": "^1.5.0",
-    "wink-nlp": "^1.14.2",
+    "wink-eng-lite-web-model": "latest",
+    "wink-nlp": "latest",
     "yaml": "latest",
     "zustand": "latest"
   },

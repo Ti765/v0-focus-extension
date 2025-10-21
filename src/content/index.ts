@@ -1,5 +1,8 @@
 import type { Message, ContentAnalysisResult } from "../shared/types"
 import { MAX_TEXT_LENGTH } from "../shared/constants"
+import { Readability } from "@mozilla/readability"
+import winkNLP from "wink-nlp"
+import model from "wink-eng-lite-web-model"
 
 declare const chrome: typeof import("chrome-types").chrome
 
@@ -50,30 +53,45 @@ async function analyzeText(text: string, url: string): Promise<ContentAnalysisRe
   const productiveKeywords = settings?.productiveKeywords || []
   const distractingKeywords = settings?.distractingKeywords || []
 
-  const lowerText = text.toLowerCase()
+  // Instantiate wink-nlp with the model
+  const nlp = winkNLP(model)
+  const its = nlp.its
+  const as = nlp.as
 
-  // Count keyword matches
+  // Process the text
+  const doc = nlp.readDoc(text)
+
+  // Extract lemmas, removing stop words and punctuation
+  const lemmas = doc
+    .tokens()
+    .filter((t) => !t.out(its.stopWordFlag) && t.out(its.type) === "word")
+    .out(its.lemma, as.array)
+
+  // Calculate scores by comparing lemmas with keyword lists
   let productiveScore = 0
   let distractingScore = 0
 
-  productiveKeywords.forEach((keyword: string) => {
-    const regex = new RegExp(`\\b${keyword}\\b`, "gi")
-    const matches = lowerText.match(regex)
-    if (matches) productiveScore += matches.length
-  })
+  const productiveSet = new Set(productiveKeywords.map((k: string) => k.toLowerCase()))
+  const distractingSet = new Set(distractingKeywords.map((k: string) => k.toLowerCase()))
 
-  distractingKeywords.forEach((keyword: string) => {
-    const regex = new RegExp(`\\b${keyword}\\b`, "gi")
-    const matches = lowerText.match(regex)
-    if (matches) distractingScore += matches.length
+  lemmas.forEach((lemma: string) => {
+    if (productiveSet.has(lemma.toLowerCase())) {
+      productiveScore++
+    }
+    if (distractingSet.has(lemma.toLowerCase())) {
+      distractingScore++
+    }
   })
 
   const totalScore = productiveScore + distractingScore
   const distractingRatio = totalScore > 0 ? distractingScore / totalScore : 0
 
   let classification: "productive" | "distracting" | "neutral" = "neutral"
-  if (distractingRatio > 0.6) classification = "distracting"
-  else if (distractingRatio < 0.4 && productiveScore > 0) classification = "productive"
+  if (distractingRatio > 0.6) {
+    classification = "distracting"
+  } else if (distractingRatio < 0.4 && productiveScore > 0) {
+    classification = "productive"
+  }
 
   return {
     url,
@@ -86,21 +104,15 @@ async function analyzeText(text: string, url: string): Promise<ContentAnalysisRe
 // Zen Mode implementation
 let zenModeActive = false
 let originalContent: string | null = null
+let observer: MutationObserver | null = null
 
 function toggleZenMode(preset?: string) {
   if (zenModeActive) {
-    // Restore original content
-    if (originalContent) {
-      document.body.innerHTML = originalContent
-      originalContent = null
-    }
+    restoreOriginalContent()
     zenModeActive = false
     console.log("[v0] Zen Mode deactivated")
   } else {
-    // Save original content
     originalContent = document.body.innerHTML
-
-    // Apply Zen Mode transformation
     applyZenMode(preset)
     zenModeActive = true
     console.log("[v0] Zen Mode activated")
@@ -108,47 +120,71 @@ function toggleZenMode(preset?: string) {
 }
 
 function applyZenMode(preset?: string) {
-  // Simple Zen Mode: extract main content and apply clean styling
-  const mainContent = extractMainContent()
+  const documentClone = document.cloneNode(true) as Document
+  const reader = new Readability(documentClone)
+  const article = reader.parse()
 
-  // Apply user preset if available
-  if (preset) {
-    applyPreset(preset)
+  if (article && article.content) {
+    if (preset) {
+      applyPreset(preset)
+    }
+
+    const zenContainer = document.createElement("div")
+    zenContainer.id = "zen-mode-container"
+    zenContainer.style.cssText = `
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      font-family: Georgia, serif;
+      font-size: 18px;
+      line-height: 1.6;
+      color: #333;
+      background: #fff;
+    `
+    zenContainer.innerHTML = article.content
+
+    document.body.innerHTML = ""
+    document.body.appendChild(zenContainer)
+    document.body.style.background = "#f5f5f5"
+
+    setupMutationObserver()
+  } else {
+    console.warn("[v0] Readability could not extract article content")
   }
-
-  // Create clean container
-  const zenContainer = document.createElement("div")
-  zenContainer.id = "zen-mode-container"
-  zenContainer.style.cssText = `
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 40px 20px;
-    font-family: Georgia, serif;
-    font-size: 18px;
-    line-height: 1.6;
-    color: #333;
-    background: #fff;
-  `
-  zenContainer.innerHTML = mainContent
-
-  // Replace body content
-  document.body.innerHTML = ""
-  document.body.appendChild(zenContainer)
-  document.body.style.background = "#f5f5f5"
 }
 
-function extractMainContent(): string {
-  // Simple content extraction (Readability.js would be more sophisticated)
-  const article = document.querySelector("article")
-  const main = document.querySelector("main")
-  const content = document.querySelector('[role="main"]')
+function restoreOriginalContent() {
+  if (originalContent) {
+    document.body.innerHTML = originalContent
+    originalContent = null
+  }
 
-  if (article) return article.innerHTML
-  if (main) return main.innerHTML
-  if (content) return content.innerHTML
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+}
 
-  // Fallback: return body content
-  return document.body.innerHTML
+function setupMutationObserver() {
+  if (observer) {
+    observer.disconnect()
+  }
+
+  const targetNode = document.body
+  const config = { childList: true, subtree: true }
+
+  let debounceTimeout: ReturnType<typeof setTimeout>
+
+  const callback = (mutationsList: MutationRecord[]) => {
+    clearTimeout(debounceTimeout)
+    debounceTimeout = setTimeout(() => {
+      console.log("[v0] DOM changes detected, reapplying Zen Mode")
+      applyZenMode()
+    }, 500)
+  }
+
+  observer = new MutationObserver(callback)
+  observer.observe(targetNode, config)
 }
 
 async function applyPreset(presetDomain: string) {
@@ -160,4 +196,57 @@ async function applyPreset(presetDomain: string) {
       document.querySelectorAll(selector).forEach((el) => el.remove())
     })
   }
+}
+
+// YouTube element hiding functionality
+async function applyYouTubeCustomizations() {
+  if (!window.location.hostname.includes("youtube.com")) return
+
+  const { siteCustomizations } = await chrome.storage.sync.get("siteCustomizations")
+  const ytSettings = siteCustomizations?.["youtube.com"]
+  if (!ytSettings) return
+
+  const selectors: { [key: string]: string } = {
+    hideHomepage: "ytd-browse[page-subtype='home'] ytd-rich-grid-renderer",
+    hideShorts: "ytd-rich-section-renderer[is-shorts], ytd-reel-shelf-renderer",
+    hideComments: "#comments, ytd-comments",
+    hideRecommendations: "#related, #secondary",
+  }
+
+  const styles: string[] = []
+
+  Object.entries(ytSettings).forEach(([key, value]) => {
+    if (value && selectors[key]) {
+      styles.push(`${selectors[key]} { display: none !important; }`)
+    }
+  })
+
+  if (styles.length > 0) {
+    const existingStyle = document.getElementById("focus-extension-yt-styles")
+    if (existingStyle) {
+      existingStyle.remove()
+    }
+
+    const styleSheet = document.createElement("style")
+    styleSheet.id = "focus-extension-yt-styles"
+    styleSheet.innerText = styles.join("\n")
+    document.head.appendChild(styleSheet)
+
+    console.log("[v0] YouTube customizations applied")
+  }
+}
+
+// Apply YouTube customizations on load
+if (window.location.hostname.includes("youtube.com")) {
+  applyYouTubeCustomizations()
+
+  // Reapply on navigation (YouTube is a SPA)
+  const ytObserver = new MutationObserver(() => {
+    applyYouTubeCustomizations()
+  })
+
+  ytObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+  })
 }

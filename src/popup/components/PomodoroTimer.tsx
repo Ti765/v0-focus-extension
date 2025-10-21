@@ -2,11 +2,12 @@
 
 import { useState } from "react"
 import { useStore } from "../store"
+import { Play, Square, Clock } from "lucide-react"
 
 export default function PomodoroTimer() {
   const { pomodoro, startPomodoro, stopPomodoro } = useStore()
-  const [focusMinutes, setFocusMinutes] = useState(pomodoro.config.focusMinutes)
-  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.breakMinutes)
+  const [focusMinutes, setFocusMinutes] = useState(pomodoro.config.focusMinutes || 25)
+  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.breakMinutes || 5)
 
   const handleStart = () => {
     startPomodoro(focusMinutes, breakMinutes)
@@ -20,45 +21,46 @@ export default function PomodoroTimer() {
 
   return (
     <div className="space-y-4">
-      {/* Status Display */}
-      <div className="bg-white rounded-lg shadow p-6 text-center">
-        <div className="text-sm font-medium text-gray-600 mb-2">
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
+        <div className="text-sm font-medium text-gray-400 mb-2">
           {pomodoro.state === "IDLE" && "Pronto para começar"}
           {pomodoro.state === "FOCUS" && "🎯 Modo Foco"}
           {pomodoro.state === "BREAK" && "☕ Pausa"}
         </div>
 
         {pomodoro.state !== "IDLE" && (
-          <div className="text-4xl font-bold text-blue-600 mb-4">{formatTime(pomodoro.timeRemaining)}</div>
+          <div className="text-4xl font-bold text-blue-400 mb-4">{formatTime(pomodoro.timeRemaining)}</div>
         )}
 
-        <div className="text-sm text-gray-500">
-          Ciclo {pomodoro.currentCycle} de {pomodoro.config.cyclesBeforeLongBreak}
+        <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+          <Clock className="w-4 h-4" />
+          <span>
+            Ciclo {pomodoro.currentCycle} de {pomodoro.config.cyclesBeforeLongBreak}
+          </span>
         </div>
       </div>
 
-      {/* Controls */}
       {pomodoro.state === "IDLE" ? (
-        <div className="bg-white rounded-lg shadow p-4 space-y-4">
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Tempo de Foco (minutos)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Tempo de Foco (minutos)</label>
             <input
               type="number"
               value={focusMinutes}
               onChange={(e) => setFocusMinutes(Number(e.target.value))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500/50"
               min="1"
               max="120"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Tempo de Pausa (minutos)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Tempo de Pausa (minutos)</label>
             <input
               type="number"
               value={breakMinutes}
               onChange={(e) => setBreakMinutes(Number(e.target.value))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500/50"
               min="1"
               max="60"
             />
@@ -66,24 +68,25 @@ export default function PomodoroTimer() {
 
           <button
             onClick={handleStart}
-            className="w-full bg-blue-600 text-white py-3 rounded-md font-medium hover:bg-blue-700 transition-colors"
+            className="w-full bg-blue-500 hover:bg-blue-600 text-white py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
           >
+            <Play className="w-5 h-5" />
             Iniciar Pomodoro
           </button>
         </div>
       ) : (
         <button
           onClick={stopPomodoro}
-          className="w-full bg-red-600 text-white py-3 rounded-md font-medium hover:bg-red-700 transition-colors"
+          className="w-full bg-red-500 hover:bg-red-600 text-white py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
         >
+          <Square className="w-5 h-5" />
           Parar Pomodoro
         </button>
       )}
 
-      {/* Info */}
-      <div className="bg-blue-50 rounded-lg p-4 text-sm text-gray-700">
-        <p className="font-medium mb-2">Como funciona:</p>
-        <ul className="list-disc list-inside space-y-1 text-xs">
+      <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+        <p className="text-xs font-medium text-blue-300 mb-2">Como funciona:</p>
+        <ul className="list-disc list-inside space-y-1 text-xs text-blue-200">
           <li>Durante o foco, sites da blacklist são bloqueados</li>
           <li>Após 4 ciclos, você ganha uma pausa longa</li>
           <li>Modo adaptativo aumenta o tempo de foco gradualmente</li>
