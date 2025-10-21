@@ -22,11 +22,13 @@ export default defineConfig({
   ],
   build: {
     outDir: "dist",
-    emptyOutDir: true, // Limpa a pasta 'dist' antes do primeiro build
+    emptyOutDir: true,
     rollupOptions: {
+      // CORREÇÃO CRÍTICA: Removido 'public/' dos caminhos de entrada
+      // para que os arquivos HTML sejam gerados na raiz da 'dist'.
       input: {
-        popup: resolve(__dirname, "public/popup.html"),
-        options: resolve(__dirname, "public/options.html"),
+        popup: resolve(__dirname, "popup.html"),
+        options: resolve(__dirname, "options.html"),
         background: resolve(__dirname, "src/background/index.ts"),
       },
       output: {
