@@ -1,52 +1,62 @@
-"use client"
+// src/popup/App.tsx
+"use client";
 
-import { useEffect, useState } from "react"
-import { useStore } from "./store"
-import { ExternalLink, Focus } from "lucide-react"
-import BlacklistManager from "./components/BlacklistManager"
-import PomodoroTimer from "./PomodoroTimer" // Corrigido o caminho de importação
-import UsageDashboard from "./components/UsageDashboard"
+import { useEffect, useState } from "react";
+import { useStore } from "./store";
+import { ExternalLink, Focus } from "lucide-react";
+import BlacklistManager from "./components/BlacklistManager";
+import PomodoroTimer from "./PomodoroTimer";
+import UsageDashboard from "./components/UsageDashboard";
 
-declare const chrome: any
+declare const chrome: any;
 
-type Tab = "pomodoro" | "blacklist" | "dashboard"
+type Tab = "pomodoro" | "blacklist" | "dashboard";
 
 export default function App() {
-  const { isLoading, loadState, listenForUpdates } = useStore()
-  const [activeTab, setActiveTab] = useState<Tab>("pomodoro")
+  const { isLoading, error, loadState, listenForUpdates, setError } = useStore();
+  const [activeTab, setActiveTab] = useState<Tab>("pomodoro");
 
   useEffect(() => {
+    // Carrega o estado inicial e inicia listener por atualizações do SW
     loadState();
-    // Inicia o listener para atualizações em tempo real
     const unsubscribe = listenForUpdates();
-    // Limpa o listener quando o popup for fechado
     return () => unsubscribe();
-  }, [loadState, listenForUpdates]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openDashboard = () => {
-    if (typeof chrome !== "undefined" && chrome.tabs) {
-      chrome.tabs.create({ url: "options.html" })
+    try {
+      if (typeof chrome !== "undefined") {
+        if (chrome?.runtime?.openOptionsPage) {
+          chrome.runtime.openOptionsPage();
+        } else if (chrome?.tabs?.create && chrome?.runtime?.getURL) {
+          chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
+        }
+      }
+    } catch (e) {
+      console.warn("[v0] Failed to open options page:", e);
     }
-  }
+  };
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full min-h-[500px] bg-[#0d0d1a]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-400 mx-auto"></div>
-          <p className="mt-4 text-gray-400 text-sm">Carregando...</p>
+        <p className="mt-4 text-gray-400 text-sm">Carregando...</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="w-full h-full min-h-[500px] bg-[#0d0d1a] p-2">
       <div className="glass-card h-full flex flex-col overflow-hidden">
+        {/* Header */}
         <div className="p-4 border-b border-white/10 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-gradient-to-br from-blue-500 to-purple-600 rounded-md">
-                <Focus className="w-5 h-5 text-white" />
+              <Focus className="w-5 h-5 text-white" />
             </div>
             <div>
               <h1 className="text-md font-bold text-white">Focus Extension</h1>
@@ -62,6 +72,7 @@ export default function App() {
           </button>
         </div>
 
+        {/* Abas */}
         <div className="flex border-b border-white/10 flex-shrink-0">
           <button
             onClick={() => setActiveTab("pomodoro")}
@@ -95,12 +106,27 @@ export default function App() {
           </button>
         </div>
 
+        {/* Conteúdo */}
         <div className="p-4 flex-1 overflow-y-auto">
+          {/* Erro global */}
+          {error && (
+            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 text-red-300 text-xs rounded-md flex justify-between items-center">
+              <span>{error}</span>
+              <button
+                onClick={() => setError(null)}
+                className="text-red-300 hover:text-red-100 text-lg"
+                aria-label="Fechar alerta de erro"
+              >
+                &times;
+              </button>
+            </div>
+          )}
+
           {activeTab === "pomodoro" && <PomodoroTimer />}
           {activeTab === "blacklist" && <BlacklistManager />}
           {activeTab === "dashboard" && <UsageDashboard />}
         </div>
       </div>
     </div>
-  )
+  );
 }
