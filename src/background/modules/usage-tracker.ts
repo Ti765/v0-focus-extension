@@ -4,10 +4,10 @@ import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
 import { normalizeDomain, extractDomain } from "../../shared/url";
 
 let activeTabId: number | null = null;
-// CORREÇÃO: Adicionado guard para evitar múltiplos listeners.
 let usageInitialized = false;
-const LIMIT_RULE_BASE = 3000;
 let dailySyncInitialized = false;
+
+const LIMIT_RULE_BASE = 3000;
 
 export async function initializeDailySync() {
   if (dailySyncInitialized) return;
@@ -16,25 +16,28 @@ export async function initializeDailySync() {
   await chrome.alarms.clear(ALARM_NAMES.DAILY_SYNC);
   const minutesInDay = 60 * 24;
   await chrome.alarms.create(ALARM_NAMES.DAILY_SYNC, { periodInMinutes: minutesInDay });
+
   chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name !== ALARM_NAMES.DAILY_SYNC) return;
     await clearAllTimeLimitSessionRules();
-    // Optional: compact daily usage here if desired
+    // (opcional) compactar dailyUsage aqui
   });
 }
 
 async function clearAllTimeLimitSessionRules() {
-  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS);
-  if (!timeLimits || timeLimits.length === 0) return;
-  const ids = timeLimits.map((e: TimeLimitEntry) =>
-    e.domain.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), LIMIT_RULE_BASE)
+  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(
+    STORAGE_KEYS.TIME_LIMITS
   );
+  if (!timeLimits || timeLimits.length === 0) return;
+
+  const ids = timeLimits.map((e: TimeLimitEntry) =>
+    e.domain.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), LIMIT_RULE_BASE)
+  );
+
   if (ids.length) {
     await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids });
   }
 }
-
-// normalizeDomain and extractDomain are now imported from shared/url
 
 export async function initializeUsageTracker() {
   if (usageInitialized) return;
@@ -88,14 +91,20 @@ async function handleWindowFocusChange(windowId: number) {
 }
 
 async function restoreTracking() {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id && activeTab.url) {
-        await startTrackingTab(activeTab.id, activeTab.url);
-    }
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab?.id && activeTab.url) {
+    await startTrackingTab(activeTab.id, activeTab.url);
+  }
 }
 
 async function startTrackingTab(tabId: number | undefined, url: string | undefined) {
-  if (!tabId || !url || url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("about:")) {
+  if (
+    !tabId ||
+    !url ||
+    url.startsWith("chrome://") ||
+    url.startsWith("chrome-extension://") ||
+    url.startsWith("about:")
+  ) {
     await stopTracking();
     return;
   }
@@ -108,28 +117,29 @@ async function startTrackingTab(tabId: number | undefined, url: string | undefin
 }
 
 async function stopTracking() {
-    activeTabId = null;
-    await chrome.storage.session.remove(STORAGE_KEYS.CURRENTLY_TRACKING);
+  activeTabId = null;
+  await chrome.storage.session.remove(STORAGE_KEYS.CURRENTLY_TRACKING);
 }
 
 async function recordActiveTabUsage() {
   const result = await chrome.storage.session.get(STORAGE_KEYS.CURRENTLY_TRACKING);
   const trackingInfo = result[STORAGE_KEYS.CURRENTLY_TRACKING];
-  
+
   if (!trackingInfo || !trackingInfo.url || !trackingInfo.startTime) return;
 
   const domain = extractDomain(trackingInfo.url);
   const timeSpent = Math.floor((Date.now() - trackingInfo.startTime) / 1000);
 
+  // Reinicia p/ próximo ciclo
   trackingInfo.startTime = Date.now();
   await chrome.storage.session.set({ [STORAGE_KEYS.CURRENTLY_TRACKING]: trackingInfo });
 
-  if (timeSpent < 1) {
-    return;
-  }
+  if (timeSpent < 1) return;
 
   const today = new Date().toISOString().split("T")[0];
-  const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(STORAGE_KEYS.DAILY_USAGE);
+  const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(
+    STORAGE_KEYS.DAILY_USAGE
+  );
 
   if (!dailyUsage[today]) {
     dailyUsage[today] = {};
@@ -137,35 +147,41 @@ async function recordActiveTabUsage() {
   dailyUsage[today][domain] = (dailyUsage[today][domain] || 0) + timeSpent;
 
   await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
-  
+
   console.log("[v0] Recorded usage:", domain, timeSpent, "seconds");
-  
+
   await notifyStateUpdate();
 
   await checkTimeLimit(domain, dailyUsage[today][domain]);
 }
 
 async function checkTimeLimit(domain: string, totalSeconds: number) {
-  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS);
+  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(
+    STORAGE_KEYS.TIME_LIMITS
+  );
   const limit = timeLimits.find((entry: TimeLimitEntry) => entry.domain === domain);
 
   if (!limit) return;
 
   const limitSeconds = limit.limitMinutes * 60;
   if (totalSeconds >= limitSeconds) {
-  const ruleId = domain.split('').reduce((acc, char) => acc + char.charCodeAt(0), LIMIT_RULE_BASE); 
-    
+    const ruleId = domain
+      .split("")
+      .reduce((acc, char) => acc + char.charCodeAt(0), LIMIT_RULE_BASE);
+
     await chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [ruleId], 
-      addRules: [{
-        id: ruleId,
-        priority: 3, 
-        action: { type: "block" as chrome.declarativeNetRequest.RuleActionType },
-        condition: {
-          urlFilter: `||${domain}`,
-          resourceTypes: [ "main_frame" as chrome.declarativeNetRequest.ResourceType],
+      removeRuleIds: [ruleId],
+      addRules: [
+        {
+          id: ruleId,
+          priority: 3,
+          action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
+          condition: {
+            urlFilter: `||${domain}`,
+            resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
+          },
         },
-      }],
+      ],
     });
 
     if (await notificationsAllowed()) {
@@ -181,29 +197,34 @@ async function checkTimeLimit(domain: string, totalSeconds: number) {
 }
 
 export async function setTimeLimit(domain: string, limitMinutes: number) {
-  // CORREÇÃO: Normaliza o domínio para consistência.
   const normalizedDomain = normalizeDomain(domain);
-  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(STORAGE_KEYS.TIME_LIMITS);
+  if (!normalizedDomain) return;
 
-  const existingIndex = timeLimits.findIndex((entry: TimeLimitEntry) => entry.domain === normalizedDomain);
-  
+  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(
+    STORAGE_KEYS.TIME_LIMITS
+  );
+
+  const existingIndex = timeLimits.findIndex(
+    (entry: TimeLimitEntry) => entry.domain === normalizedDomain
+  );
+
   if (limitMinutes > 0) {
     if (existingIndex >= 0) {
-        timeLimits[existingIndex].limitMinutes = limitMinutes;
-      } else {
-        timeLimits.push({ domain: normalizedDomain, limitMinutes });
-      }
-  } else { 
-      if (existingIndex >= 0) {
-        timeLimits.splice(existingIndex, 1);
-  const ruleId = normalizedDomain.split('').reduce((acc, char) => acc + char.charCodeAt(0), LIMIT_RULE_BASE);
-        await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
-      }
+      timeLimits[existingIndex].limitMinutes = limitMinutes;
+    } else {
+      timeLimits.push({ domain: normalizedDomain, limitMinutes });
+    }
+  } else {
+    if (existingIndex >= 0) {
+      timeLimits.splice(existingIndex, 1);
+      const ruleId = normalizedDomain
+        .split("")
+        .reduce((acc, char) => acc + char.charCodeAt(0), LIMIT_RULE_BASE);
+      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
+    }
   }
 
   await chrome.storage.local.set({ [STORAGE_KEYS.TIME_LIMITS]: timeLimits });
   await notifyStateUpdate();
   console.log("[v0] Time limit set/updated:", normalizedDomain, limitMinutes, "minutes");
 }
-
-// extractDomain is imported from shared/url

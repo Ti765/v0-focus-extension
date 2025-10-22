@@ -1,21 +1,29 @@
-// Adicionado para confirmação
+// Logs de inicialização
 console.log("[v0] Service Worker starting up...");
 
 import { initializePomodoro } from "./modules/pomodoro";
-import { initializeBlocker } from "./modules/blocker";
-import { initializeUsageTracker } from "./modules/usage-tracker";
+import { addToBlacklist, initializeBlocker } from "./modules/blocker";
+import { initializeUsageTracker, initializeDailySync } from "./modules/usage-tracker";
 import { initializeContentAnalyzer } from "./modules/content-analyzer";
 import { initializeFirebaseSync } from "./modules/firebase-sync";
 import { handleMessage } from "./modules/message-handler";
 import { STORAGE_KEYS, DEFAULT_SETTINGS, DEFAULT_POMODORO_CONFIG } from "../shared/constants";
 import type { AppState, PomodoroStatus } from "../shared/types";
-import { initializeDailySync } from "./modules/usage-tracker";
 
-// Service Worker initialization
+// Função de bootstrap para inicializar todos os módulos
+async function bootstrap() {
+  await initializePomodoro();
+  await initializeBlocker();
+  await initializeUsageTracker();
+  await initializeDailySync();      // reset diário de regras de limite
+  await initializeContentAnalyzer();
+  await initializeFirebaseSync();
+}
+
+// onInstalled: cria estado inicial e reinjeta content.js após update
 chrome.runtime.onInstalled.addListener(async (details: chrome.runtime.InstalledDetails) => {
   console.log("[v0] Extension installed/updated:", details.reason);
 
-  // Initialize default state on first install
   if (details.reason === "install") {
     const initialState: Partial<AppState> = {
       blacklist: [],
@@ -47,43 +55,62 @@ chrome.runtime.onInstalled.addListener(async (details: chrome.runtime.InstalledD
     console.log("[v0] Initial state created");
   }
 
-  // Initialize all modules
-  await initializePomodoro();
-  await initializeBlocker();
-  await initializeUsageTracker();
-  await initializeDailySync();
-  await initializeContentAnalyzer();
-  await initializeFirebaseSync();
+  // Após update, reinjeta o content script nas abas abertas
+  if (details.reason === "update") {
+    console.log("[v0] Re-injecting content scripts after update.");
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    for (const tab of tabs) {
+      if (tab.id) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content.js"] // precisa existir em dist/ (gerado por vite.content.config.ts)
+          });
+        } catch (e) {
+          console.warn(`[v0] Failed to re-inject script into tab ${tab.id}:`, e);
+        }
+      }
+    }
+  }
+
+  await bootstrap();
 });
 
-// Service Worker startup
+// onStartup: re-inicializa módulos ao iniciar o navegador
 chrome.runtime.onStartup.addListener(async () => {
-  console.log("[v0] Extension started");
-
-  // Re-initialize modules on browser startup
-  await initializePomodoro();
-  await initializeBlocker();
-  await initializeUsageTracker();
-  await initializeDailySync();
-  await initializeContentAnalyzer();
-  await initializeFirebaseSync();
+  console.log("[v0] Extension started on browser startup");
+  await bootstrap();
 });
 
-// Message handling - central communication hub
+// Hub central de mensagens
 chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
-  console.log("[v0] Message received:", message.type, message.payload);
+  console.log("[v0] Message received:", message?.type, message?.payload);
 
-  // Handle message asynchronously
   handleMessage(message, sender)
     .then(sendResponse)
     .catch((error) => {
       console.error("[v0] Error handling message:", error);
-      sendResponse({ error: error.message });
+      sendResponse({ error: error?.message ?? String(error) });
     });
 
-  // Return true to indicate async response
-  return true;
+  return true; // resposta assíncrona
+});
+
+// Listener para botões de notificação (ex.: sugestão de bloquear site distrativo)
+chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIndex) => {
+  console.log("[v0] Notification button clicked:", notificationId, buttonIndex);
+
+  // Botão "Sim, bloquear" da sugestão do analisador de conteúdo
+  if (notificationId.startsWith("suggest-block-") && buttonIndex === 0) {
+    const domain = notificationId.replace("suggest-block-", "");
+    if (domain) {
+      await addToBlacklist(domain);
+      console.log(`[v0] Added ${domain} to blacklist from notification.`);
+    }
+  }
+
+  // Limpa a notificação após clique
+  chrome.notifications.clear(notificationId);
 });
 
 console.log("[v0] Service Worker loaded and listeners attached.");
-

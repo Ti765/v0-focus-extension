@@ -4,10 +4,13 @@
   "description": "Browser extension for focus and productivity management",
   "type": "module",
   "scripts": {
-    "build": "tsc && vite build --config vite.config.ts && vite build --config vite.content.config.ts",
     "dev": "vite",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:ui": "tsc && vite build --config vite.config.ts",
+    "build:content": "vite build --config vite.content.config.ts",
+    "build:background": "vite build --config vite.background.config.ts",
+    "build": "npm run build:ui && npm run build:content && npm run build:background"
   },
   "dependencies": {
     "@mozilla/readability": "latest",
@@ -84,4 +87,3 @@
     "vite-plugin-static-copy": "^1.0.6"
   }
 }
-

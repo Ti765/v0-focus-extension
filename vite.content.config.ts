@@ -1,22 +1,27 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
-// Configuração separada para construir o content script como um bundle IIFE
+// Build do Content Script COMO SCRIPT CLÁSSICO (IIFE), não ESM.
+// Gera UM ÚNICO ARQUIVO: dist/content.js
 export default defineConfig({
+  base: '', // caminhos relativos
   build: {
     outDir: 'dist',
-    emptyOutDir: false, // Não limpa a pasta 'dist' para não apagar o build principal
+    emptyOutDir: false, // dist já existe do build da UI
+    target: 'es2020',
+    minify: 'esbuild',
+    lib: {
+      entry: resolve(__dirname, 'src/content/index.ts'),
+      formats: ['iife'], // obrigatório para content script (não pode ser module)
+      name: 'content', // nome global (não é crítico)
+      fileName: () => 'content.js',
+    },
     rollupOptions: {
-      input: {
-        content: resolve(__dirname, 'src/content/index.ts'),
-      },
       output: {
-        entryFileNames: 'content.js',
-        // Formato IIFE (Immediately Invoked Function Expression)
-        // Agrupa todo o código em um único arquivo sem 'import'
-        format: 'iife',
+        // garante bundle único, sem chunks
+        inlineDynamicImports: true,
+        manualChunks: undefined,
       },
     },
   },
 });
-

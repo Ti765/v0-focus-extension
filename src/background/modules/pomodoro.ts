@@ -13,12 +13,14 @@ export async function initializePomodoro() {
 }
 
 export async function startPomodoro(config?: Partial<PomodoroConfig>) {
-  const { [STORAGE_KEYS.POMODORO_STATUS]: currentStatus } = await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS);
-  const pomodoroConfig = { ...DEFAULT_POMODORO_CONFIG, ...currentStatus?.config, ...config };
+  const { [STORAGE_KEYS.POMODORO_STATUS]: currentStatus } = 
+    (await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS)) as { [key: string]: PomodoroStatus };
+
+  const pomodoroConfig = { ...(currentStatus?.config || DEFAULT_POMODORO_CONFIG), ...config };
 
   const newStatus: PomodoroStatus = {
     state: "FOCUS",
-    startTime: Date.now(), // Armazena o tempo de início para cálculo na UI
+    startTime: Date.now(),
     timeRemaining: pomodoroConfig.focusMinutes * 60,
     currentCycle: (currentStatus?.currentCycle || 0) + 1,
     config: pomodoroConfig,
@@ -30,8 +32,9 @@ export async function startPomodoro(config?: Partial<PomodoroConfig>) {
   await enablePomodoroBlocking();
   await notifyStateUpdate();
 
-  if (pomodoroConfig.notificationsEnabled !== false) {
-    chrome.notifications.create({
+  // CORREÇÃO: Verifica a config interna do pomodoro para notificação
+  if (pomodoroConfig.notificationsEnabled) {
+    chrome.notifications.create('pomodoro-start', {
       type: "basic",
       iconUrl: "icons/icon48.png",
       title: "Pomodoro Iniciado",
@@ -42,11 +45,13 @@ export async function startPomodoro(config?: Partial<PomodoroConfig>) {
 }
 
 export async function stopPomodoro() {
-  const { [STORAGE_KEYS.POMODORO_STATUS]: currentStatus } = await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS);
+  const { [STORAGE_KEYS.POMODORO_STATUS]: currentStatus } = 
+    (await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS)) as { [key: string]: PomodoroStatus };
+  
   const idleStatus: PomodoroStatus = {
     state: "IDLE",
     timeRemaining: 0,
-    currentCycle: 0,
+    currentCycle: 0, // Reseta o ciclo ao parar
     config: currentStatus?.config || DEFAULT_POMODORO_CONFIG,
     startTime: undefined,
   };
@@ -59,7 +64,9 @@ export async function stopPomodoro() {
 }
 
 async function handlePomodoroAlarm() {
-  const { [STORAGE_KEYS.POMODORO_STATUS]: status } = await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS);
+  const { [STORAGE_KEYS.POMODORO_STATUS]: status } = 
+    (await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS)) as { [key: string]: PomodoroStatus };
+  
   if (!status) return;
 
   if (status.state === "FOCUS") {
@@ -72,8 +79,8 @@ async function handlePomodoroAlarm() {
     await disablePomodoroBlocking();
     await notifyStateUpdate();
 
-    if (status.config.notificationsEnabled !== false) {
-      chrome.notifications.create({
+    if (status.config.notificationsEnabled) {
+      chrome.notifications.create('pomodoro-break', {
         type: "basic",
         iconUrl: "icons/icon48.png",
         title: "Pausa!",
@@ -84,7 +91,7 @@ async function handlePomodoroAlarm() {
 
   } else if (status.state === "BREAK") {
     if (status.config.adaptiveMode && status.currentCycle % status.config.cyclesBeforeLongBreak === 0) {
-      status.config.focusMinutes += 5;
+      status.config.focusMinutes += 5; // Lógica adaptativa
       console.log("[v0] Adaptive mode: Focus time increased to", status.config.focusMinutes);
     }
 
@@ -92,8 +99,8 @@ async function handlePomodoroAlarm() {
     await chrome.storage.local.set({ [STORAGE_KEYS.POMODORO_STATUS]: idleStatus });
     await notifyStateUpdate();
 
-    if (status.config.notificationsEnabled !== false) {
-      chrome.notifications.create({
+    if (status.config.notificationsEnabled) {
+      chrome.notifications.create('pomodoro-cycle-complete', {
         type: "basic",
         iconUrl: "icons/icon48.png",
         title: "Ciclo Completo!",

@@ -1,12 +1,16 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Focus Extension</title>
-</head>
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/popup/main.tsx"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Focus Extension</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Vite vai reescrever este caminho para /assets/popup.[hash].js no build -->
+    <script type="module" src="/src/popup/main.tsx"></script>
+  </body>
 </html>
