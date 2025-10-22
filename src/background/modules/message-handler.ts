@@ -8,11 +8,22 @@ import { addToBlacklist, removeFromBlacklist } from "./blocker";
 import { startPomodoro, stopPomodoro } from "./pomodoro";
 import { setTimeLimit } from "./usage-tracker";
 import { handleContentAnalysisResult } from "./content-analyzer";
+import { deepEqual } from "../../shared/utils";
 
 /** Notifica todas as UIs (popup/options) que o state mudou */
 export async function notifyStateUpdate() {
   try {
     const appState = await getAppState();
+    // Guard: avoid broadcasting identical state repeatedly (which can cause UI echo loops)
+    try {
+      if ((notifyStateUpdate as any)._lastEmitted && deepEqual((notifyStateUpdate as any)._lastEmitted, appState)) {
+        // no-op: state identical to last emitted
+        return;
+      }
+      (notifyStateUpdate as any)._lastEmitted = appState;
+    } catch (e) {
+      // if deepEqual fails for any reason, proceed with broadcast
+    }
     // broadcast: use callback and check chrome.runtime.lastError to avoid
     // noisy "Receiving end does not exist" when no UI is open.
     chrome.runtime.sendMessage({ type: "STATE_UPDATED", payload: appState }, () => {

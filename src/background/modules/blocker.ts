@@ -53,6 +53,19 @@ export async function addToBlacklist(domain: string) {
     { domain: normalized, addedAt: Date.now() },
   ];
 
+  // If nothing changed (defensive), avoid writing and broadcasting
+  try {
+    const prev = blacklist;
+    // shallow/structural check: length and domains
+    const same = prev.length === updated.length && prev.every((v, i) => v.domain === updated[i].domain && v.addedAt === updated[i].addedAt);
+    if (same) {
+      console.log("[v0] addToBlacklist: no-op, blacklist identical");
+      return;
+    }
+  } catch (e) {
+    // ignore and proceed to write
+  }
+
   await chrome.storage.local.set({ [STORAGE_KEYS.BLACKLIST]: updated });
   await syncUserBlacklistRules();
   await notifyStateUpdate();
@@ -72,6 +85,16 @@ export async function removeFromBlacklist(domain: string) {
   if (updated.length === blacklist.length) {
     // nada para remover
     return;
+  }
+  // If update didn't change content in a material way, skip writing
+  try {
+    const same = updated.length === blacklist.length && updated.every((v, i) => v.domain === blacklist[i].domain && v.addedAt === blacklist[i].addedAt);
+    if (same) {
+      console.log("[v0] removeFromBlacklist: no-op, blacklist identical");
+      return;
+    }
+  } catch (e) {
+    // ignore and proceed
   }
 
   await chrome.storage.local.set({ [STORAGE_KEYS.BLACKLIST]: updated });

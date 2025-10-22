@@ -4,7 +4,7 @@ import { MAX_TEXT_LENGTH, STORAGE_KEYS } from "../shared/constants";
 // ─────────────────────────────────────────────────────────────
 // Anti-reinjeção: marca que o CS já está presente
 // ─────────────────────────────────────────────────────────────
-;(window as any).v0ContentScriptInjected = true;
+(window as any).v0ContentScriptInjected = true;
 
 console.log("[v0][CS] Content script loaded");
 

@@ -5,7 +5,7 @@
  */
 export function normalizeDomain(domainOrUrl: string): string {
   if (!domainOrUrl) return "";
-  let input = domainOrUrl.trim();
+  const input = domainOrUrl.trim();
 
   try {
     // Se não começar com http, tentamos como https p/ extrair hostname

@@ -1,6 +1,7 @@
 // src/popup/store.ts
 import { create } from "zustand";
 import type { AppState, Message } from "../shared/types";
+import { deepEqual } from "../shared/utils";
 
 // ───────────────────────────────────────────────────────────────
 // Wrapper: sendMessage como Promise + tratamento de lastError
@@ -86,14 +87,37 @@ export const useStore = create<PopupStore>((set) => ({
       return () => void 0;
     }
 
-    const handler = (msg: Message) => {
-      if (msg?.type === "STATE_UPDATED" && msg.payload) {
-        set({ ...(msg.payload as AppState), isLoading: false, error: null });
-      }
-    };
+    // ensure we only register one handler per page lifetime
+    const globalAny = globalThis as any;
+    if (!globalAny.__v0_store_listener_registered) {
+      const handler = (msg: Message) => {
+        if (msg?.type === "STATE_UPDATED" && msg.payload) {
+          // Dedupe: only set if payload differs from current store
+          set((curr) => {
+            const incoming = msg.payload as AppState;
+            // compare relevant parts (we compare whole AppState)
+            if (deepEqual({
+              blacklist: curr.blacklist,
+              timeLimits: curr.timeLimits,
+              dailyUsage: curr.dailyUsage,
+              pomodoro: curr.pomodoro,
+              siteCustomizations: curr.siteCustomizations,
+              settings: curr.settings,
+            }, incoming)) {
+              return { isLoading: false, error: null } as any; // no change
+            }
+            return { ...(incoming as AppState), isLoading: false, error: null } as any;
+          });
+        }
+      };
 
-    chrome.runtime.onMessage.addListener(handler);
-    return () => chrome.runtime.onMessage.removeListener(handler);
+      chrome.runtime.onMessage.addListener(handler);
+      globalAny.__v0_store_listener_registered = true;
+      // provide a cleanup function for callers if needed
+      return () => chrome.runtime.onMessage.removeListener(handler);
+    }
+    // already registered: return noop cleanup
+    return () => void 0;
   },
 
   // Ações que conversam com o Service Worker
