@@ -1,56 +1,28 @@
 // src/popup/store.ts
 import { create } from "zustand";
 import type { AppState, Message } from "../shared/types";
-import { chromeAPI } from "../shared/chrome-mock"; // mock opcional para dev fora do Chrome
 
-// ───────────────────────────────────────────────────────────────────────────────
-// Helpers de ambiente
-// ───────────────────────────────────────────────────────────────────────────────
-const hasChrome =
-  typeof chrome !== "undefined" &&
-  !!chrome.runtime &&
-  // quando roda dentro da extensão, chrome.runtime.id existe
-  (typeof chrome.runtime.id === "string" || typeof chrome.runtime.id === "number");
-
-const runtimeLike: {
-  sendMessage: (msg: any, cb?: (res?: any) => void) => void;
-  onMessage?: { addListener?: any; removeListener?: any };
-  lastError?: { message?: string };
-} = hasChrome ? (chrome.runtime as any) : (chromeAPI.runtime as any);
-
-// ───────────────────────────────────────────────────────────────────────────────
-// Encapsula sendMessage em Promise + tratamento de erro/lastError
-// ───────────────────────────────────────────────────────────────────────────────
-async function sendMessageAsync(message: Message): Promise<any> {
-  if (!runtimeLike?.sendMessage) {
-    // Ambiente fora do Chrome e sem mock
-    throw new Error("Chrome runtime indisponível.");
-  }
-
+// ───────────────────────────────────────────────────────────────
+// Wrapper: sendMessage como Promise + tratamento de lastError
+// ───────────────────────────────────────────────────────────────
+function sendMessageAsync<T = any>(message: Message): Promise<T> {
   return new Promise((resolve, reject) => {
     try {
-      runtimeLike.sendMessage(message, (response: any) => {
-        // Quando estamos no Chrome, podemos ler lastError corretamente
-        const lastErr =
-          hasChrome && chrome.runtime ? chrome.runtime.lastError : runtimeLike.lastError;
-
-        if (lastErr && lastErr.message) {
-          reject(new Error(lastErr.message));
-        } else if (response && response.error) {
-          reject(new Error(response.error));
-        } else {
-          resolve(response);
-        }
+      chrome.runtime.sendMessage(message, (response) => {
+        const err = chrome.runtime.lastError;
+        if (err) return reject(new Error(err.message));
+        if (response?.error) return reject(new Error(response.error));
+        resolve(response);
       });
-    } catch (err: any) {
-      reject(err instanceof Error ? err : new Error(String(err)));
+    } catch (e) {
+      reject(e);
     }
   });
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// Tipagem do store
-// ───────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
+// Tipos do store
+// ───────────────────────────────────────────────────────────────
 interface PopupStore extends AppState {
   isLoading: boolean;
   error: string | null;
@@ -62,13 +34,14 @@ interface PopupStore extends AppState {
   startPomodoro: (focusMinutes: number, breakMinutes: number) => Promise<void>;
   stopPomodoro: () => Promise<void>;
   toggleZenMode: (preset?: string) => Promise<void>;
+  setTimeLimit: (domain: string, limitMinutes: number) => Promise<void>;
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// Store
-// ───────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
+// Implementação do store
+// ───────────────────────────────────────────────────────────────
 export const useStore = create<PopupStore>((set) => ({
-  // Estado inicial (fallback até GET_INITIAL_STATE chegar)
+  // Estado inicial (fallback até o GET_INITIAL_STATE chegar)
   blacklist: [],
   timeLimits: [],
   dailyUsage: {},
@@ -99,63 +72,54 @@ export const useStore = create<PopupStore>((set) => ({
 
   loadState: async () => {
     try {
-      set({ isLoading: true, error: null });
-      const response = await sendMessageAsync({ type: "GET_INITIAL_STATE" } as Message);
-      // `response` deve ser o AppState completo vindo do SW
-      set({ ...(response as AppState), isLoading: false });
-    } catch (error: any) {
-      console.error("[v0] Error loading state:", error);
-      set({ isLoading: false, error: "Falha ao carregar o estado inicial." });
+      const response = await sendMessageAsync<AppState>({ type: "GET_INITIAL_STATE" });
+      set({ ...response, isLoading: false, error: null });
+    } catch (e) {
+      console.error("[v0][Store] loadState failed:", e);
+      set({ error: "Falha ao carregar o estado inicial.", isLoading: false });
     }
   },
 
   listenForUpdates: () => {
-    // Se não estiver no ambiente da extensão, retorna um noop unsubscribe
-    if (!hasChrome || !chrome.runtime?.onMessage?.addListener) {
+    // Se não estiver no ambiente da extensão (tests/dev), retorna um noop
+    if (typeof chrome === "undefined" || !chrome.runtime?.onMessage?.addListener) {
       return () => void 0;
     }
 
-    const listener = (message: Message) => {
-      if (message?.type === "STATE_UPDATED") {
-        console.log("[v0] State update received from background:", message.payload);
-        // Atualiza somente os dados (mantém actions do store)
-        set({ ...(message.payload as AppState), isLoading: false, error: null });
+    const handler = (msg: Message) => {
+      if (msg?.type === "STATE_UPDATED" && msg.payload) {
+        set({ ...(msg.payload as AppState), isLoading: false, error: null });
       }
     };
 
-    chrome.runtime.onMessage.addListener(listener);
-    return () => {
-      try {
-        chrome.runtime.onMessage.removeListener(listener);
-        console.log("[v0] Removing state update listener.");
-      } catch {
-        // noop
-      }
-    };
+    chrome.runtime.onMessage.addListener(handler);
+    return () => chrome.runtime.onMessage.removeListener(handler);
   },
 
-  // Ações que disparam mensagens ao SW
+  // Ações que conversam com o Service Worker
   addToBlacklist: async (domain: string) => {
     try {
       set({ error: null });
-      await sendMessageAsync({ type: "ADD_TO_BLACKLIST", payload: { domain } } as Message);
-      // Estado será atualizado via STATE_UPDATED
-    } catch (error: any) {
-      console.error("[v0] Error adding to blacklist:", error);
-      set({ error: error?.message || "Falha ao adicionar à blacklist." });
-      throw error;
+      await sendMessageAsync({ type: "ADD_TO_BLACKLIST", payload: { domain } });
+      // Atualização de estado virá via STATE_UPDATED
+    } catch (e) {
+      const error = String(e);
+      console.error("[v0][Store] addToBlacklist failed:", error);
+      set({ error: "Falha ao adicionar à blacklist: " + error });
+      throw e;
     }
   },
 
   removeFromBlacklist: async (domain: string) => {
     try {
       set({ error: null });
-      await sendMessageAsync({ type: "REMOVE_FROM_BLACKLIST", payload: { domain } } as Message);
-      // Atualização vem via STATE_UPDATED
-    } catch (error: any) {
-      console.error("[v0] Error removing from blacklist:", error);
-      set({ error: error?.message || "Falha ao remover da blacklist." });
-      throw error;
+      await sendMessageAsync({ type: "REMOVE_FROM_BLACKLIST", payload: { domain } });
+      // Atualização de estado virá via STATE_UPDATED
+    } catch (e) {
+      const error = String(e);
+      console.error("[v0][Store] removeFromBlacklist failed:", error);
+      set({ error: "Falha ao remover da blacklist: " + error });
+      throw e;
     }
   },
 
@@ -165,45 +129,55 @@ export const useStore = create<PopupStore>((set) => ({
       await sendMessageAsync({
         type: "START_POMODORO",
         payload: { focusMinutes, breakMinutes },
-      } as Message);
-      // Atualização vem via STATE_UPDATED
-    } catch (error: any) {
-      console.error("[v0] Error starting pomodoro:", error);
-      set({ error: error?.message || "Falha ao iniciar Pomodoro." });
-      throw error;
+      });
+      // Atualização via STATE_UPDATED
+    } catch (e) {
+      const error = String(e);
+      console.error("[v0][Store] startPomodoro failed:", error);
+      set({ error: "Falha ao iniciar Pomodoro: " + error });
+      throw e;
     }
   },
 
   stopPomodoro: async () => {
     try {
       set({ error: null });
-      await sendMessageAsync({ type: "STOP_POMODORO" } as Message);
-      // Atualização vem via STATE_UPDATED
-    } catch (error: any) {
-      console.error("[v0] Error stopping pomodoro:", error);
-      set({ error: error?.message || "Falha ao parar Pomodoro." });
-      throw error;
+      await sendMessageAsync({ type: "STOP_POMODORO" });
+      // Atualização via STATE_UPDATED
+    } catch (e) {
+      const error = String(e);
+      console.error("[v0][Store] stopPomodoro failed:", error);
+      set({ error: "Falha ao parar Pomodoro: " + error });
+      throw e;
     }
   },
 
   toggleZenMode: async (preset?: string) => {
     try {
       set({ error: null });
-      await sendMessageAsync({ type: "TOGGLE_ZEN_MODE", payload: { preset } } as Message);
-      // Sem STATE_UPDATED; efeito é no content script
-    } catch (error: any) {
-      console.error("[v0] Error toggling Zen Mode:", error);
-      set({
-        error:
-          error?.message ||
-          "Falha ao ativar/desativar Modo Zen. A aba pode ser protegida ou sem content script.",
+      await sendMessageAsync({ type: "TOGGLE_ZEN_MODE", payload: { preset } });
+      // Não há STATE_UPDATED aqui; ação ocorre no content script
+    } catch (e) {
+      const error = String(e);
+      console.error("[v0][Store] toggleZenMode failed:", error);
+      set({ error: "Falha ao alternar Modo Zen: " + error });
+      throw e;
+    }
+  },
+
+  setTimeLimit: async (domain: string, limitMinutes: number) => {
+    try {
+      set({ error: null });
+      await sendMessageAsync({
+        type: "SET_TIME_LIMIT",
+        payload: { domain, limitMinutes }, // ⚠️ chave correta esperada pelo SW
       });
-      throw error;
+      // Atualização virá via STATE_UPDATED
+    } catch (e) {
+      const error = String(e);
+      console.error("[v0][Store] setTimeLimit failed:", error);
+      set({ error: "Falha ao definir limite de tempo: " + error });
+      throw e;
     }
   },
 }));
-
-// Nota:
-// Diferente da versão anterior, não sobrescrevemos `chrome.runtime.sendMessage` aqui.
-// O store usa `runtimeLike` internamente, com fallback para `chromeAPI` quando fora do Chrome.
-// Isso evita ReferenceError em ambientes de build/dev sem a API de extensões.

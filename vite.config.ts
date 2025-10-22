@@ -1,35 +1,35 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
-import { viteStaticCopy } from 'vite-plugin-static-copy';
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { resolve } from "path";
+import { viteStaticCopy } from "vite-plugin-static-copy";
 
-// Build principal (popup/options). Pode ter code-splitting normal em assets/.
+// Build somente da UI (popup/options). Não mexe no SW nem no content script.
 export default defineConfig({
-  base: '', // caminhos relativos — evita path quebrado na extensão
   plugins: [
     react(),
-    // Copia manifest e ícones para dist/
     viteStaticCopy({
       targets: [
-        { src: 'public/manifest.json', dest: '.' },
-        { src: 'public/icons', dest: '.' },
-      ],
-    }),
+        { src: "public/manifest.json", dest: "." },
+        { src: "public/icons", dest: "." }
+      ]
+    })
   ],
   build: {
-    outDir: 'dist',
-    emptyOutDir: true, // limpa dist no build da UI
+    outDir: "dist",
+    emptyOutDir: true, // limpa dist somente no build da UI
     rollupOptions: {
+      // Entradas HTML (o Vite seguirá os <script type="module" ...> dentro delas)
       input: {
-        popup: resolve(__dirname, 'popup.html'),
-        options: resolve(__dirname, 'options.html'),
+        popup: resolve(__dirname, "popup.html"),
+        options: resolve(__dirname, "options.html")
       },
       output: {
-        // nomes previsíveis para facilitar depuração
-        entryFileNames: 'assets/[name].js',
-        chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name].[ext]',
-      },
+        // Mantém nomes estáveis e separa os chunks em /assets
+        entryFileNames: "assets/[name].js",
+        chunkFileNames: "assets/[name].js",
+        assetFileNames: "assets/[name].[ext]"
+      }
     },
-  },
+    target: "es2020"
+  }
 });

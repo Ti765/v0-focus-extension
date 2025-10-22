@@ -1,40 +1,108 @@
 import { STORAGE_KEYS, CONTENT_ANALYSIS_THRESHOLD } from "../../shared/constants";
-import type { BlacklistEntry, ContentAnalysisResult } from "../../shared/types";
+import type { ContentAnalysisResult, BlacklistEntry } from "../../shared/types";
 import { extractDomain } from "../../shared/url";
+import { notificationsAllowed } from "./message-handler";
+
+/**
+ * Guardamos no storage de sessão os domínios já notificados recentemente
+ * para evitar múltiplas notificações repetidas.
+ */
+const NOTIFY_CACHE_KEY = "__contentSuggestNotified__";
+// Janela de supressão de notificações (em ms). Ex.: 3 horas.
+const NOTIFY_SUPPRESS_MS = 3 * 60 * 60 * 1000;
 
 export async function initializeContentAnalyzer() {
   console.log("[v0] Initializing content analyzer module");
+  // Opcional: limpar entradas expiradas do cache ao iniciar
+  try {
+    const { [NOTIFY_CACHE_KEY]: cache = {} } = await chrome.storage.session.get(NOTIFY_CACHE_KEY);
+    const now = Date.now();
+    let changed = false;
+    for (const d of Object.keys(cache || {})) {
+      if (typeof cache[d] !== "number" || now - cache[d] > NOTIFY_SUPPRESS_MS) {
+        delete cache[d];
+        changed = true;
+      }
+    }
+    if (changed) {
+      await chrome.storage.session.set({ [NOTIFY_CACHE_KEY]: cache });
+    }
+  } catch (e) {
+    // se falhar, não é crítico
+    console.warn("[v0] Unable to prune notify cache:", e);
+  }
 }
 
+/**
+ * Decide se devemos notificar sobre um domínio agora.
+ * Usa storage.session para lembrar o último envio.
+ */
+async function shouldNotifyDomain(domain: string): Promise<boolean> {
+  try {
+    const { [NOTIFY_CACHE_KEY]: cache = {} } = await chrome.storage.session.get(NOTIFY_CACHE_KEY);
+    const last = cache?.[domain] as number | undefined;
+    const now = Date.now();
+    if (last && now - last < NOTIFY_SUPPRESS_MS) {
+      return false;
+    }
+    // marca como notificado agora
+    await chrome.storage.session.set({
+      [NOTIFY_CACHE_KEY]: { ...(cache || {}), [domain]: now },
+    });
+    return true;
+  } catch {
+    // Em caso de erro no storage, ainda tentamos notificar uma vez
+    return true;
+  }
+}
+
+/**
+ * Processa o resultado da análise de conteúdo enviada pelo content script.
+ * Se o site parecer distrativo, e não estiver na blacklist, sugere bloqueio via notificação.
+ */
 export async function handleContentAnalysisResult(result: ContentAnalysisResult) {
-  console.log("[v0] Content analysis result:", result);
+  try {
+    console.log("[v0] Content analysis result:", result);
 
-  const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(
-    STORAGE_KEYS.SETTINGS
-  );
+    // Respeita a configuração global do usuário
+    if (!(await notificationsAllowed())) {
+      return;
+    }
 
-  // Gate único para notificações (evita dependência circular com message-handler)
-  if (!settings?.notificationsEnabled) return;
+    // Checa classificação + threshold
+    if (!(result.classification === "distracting" && result.score > CONTENT_ANALYSIS_THRESHOLD)) {
+      return;
+    }
 
-  if (result.classification === "distracting" && result.score > CONTENT_ANALYSIS_THRESHOLD) {
+    // Extrai domínio da URL analisada
     const domain = extractDomain(result.url);
     if (!domain) return;
 
+    // Evita sugerir se o domínio já estiver na blacklist
     const { [STORAGE_KEYS.BLACKLIST]: blacklist = [] } = await chrome.storage.local.get(
       STORAGE_KEYS.BLACKLIST
     );
-
-    const alreadyBlocked = (blacklist as BlacklistEntry[]).some(
-      (entry) => entry.domain === domain
-    );
+    const alreadyBlocked = (blacklist as BlacklistEntry[]).some((e) => e.domain === domain);
     if (alreadyBlocked) return;
 
-    chrome.notifications.create(`suggest-block-${domain}`, {
+    // Evita spam de notificações para o mesmo domínio
+    if (!(await shouldNotifyDomain(domain))) {
+      return;
+    }
+
+    // Cria notificação com ação para bloquear
+    const notificationId = `suggest-block-${domain}`;
+    await chrome.notifications.create(notificationId, {
       type: "basic",
       iconUrl: "icons/icon48.png",
       title: "Site Potencialmente Distrativo",
       message: `${domain} parece ser distrativo. Deseja adicioná-lo à sua lista de bloqueio?`,
       buttons: [{ title: "Sim, bloquear" }, { title: "Não, obrigado" }],
+      // Você pode manter a notificação até interação do usuário, se quiser:
+      // requireInteraction: true,
+      // priority: 0,
     });
+  } catch (e) {
+    console.error("[v0] Error while handling content analysis result:", e);
   }
 }

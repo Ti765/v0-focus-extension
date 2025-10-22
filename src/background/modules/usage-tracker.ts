@@ -3,62 +3,58 @@ import type { TimeLimitEntry } from "../../shared/types";
 import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
 import { normalizeDomain, extractDomain } from "../../shared/url";
 
+// --- Estado interno ---
 let activeTabId: number | null = null;
-
-// Evita múltiplas inicializações/listeners
 let usageInitialized = false;
 let dailySyncInitialized = false;
 
-// Base para IDs das regras de limite de tempo (faixa 3000..3999)
+// Base para IDs das regras de sessão (time limits). Usamos um range separado (3000..3999).
 const LIMIT_RULE_BASE = 3000;
+const LIMIT_RULE_RANGE = 1000;
 
-// -------------------------
-// Utilidades de ID de regra
-// -------------------------
+// ---- Util: gera ID determinístico para uma regra de sessão de limite de tempo ----
 function generateLimitRuleId(domain: string): number {
-  // hash simples determinístico
   let hash = 0;
   for (let i = 0; i < domain.length; i++) {
     const c = domain.charCodeAt(i);
     hash = (hash << 5) - hash + c;
-    hash |= 0; // 32-bit
+    hash |= 0; // 32 bits
   }
-  return LIMIT_RULE_BASE + (Math.abs(hash) % 1000); // 3000..3999
+  const offset = Math.abs(hash) % LIMIT_RULE_RANGE;
+  return LIMIT_RULE_BASE + offset;
 }
 
-// -------------------------
-// Daily Sync (limpa regras de sessão na virada do dia)
-// -------------------------
+// ---- Agendamento diário: limpar regras de sessão (reseta bloqueios de limite de tempo) ----
 export async function initializeDailySync() {
   if (dailySyncInitialized) return;
   dailySyncInitialized = true;
 
   console.log("[v0] Initializing daily sync for session rules...");
 
+  // cancela um eventual alarme antigo
   await chrome.alarms.clear(ALARM_NAMES.DAILY_SYNC);
 
-  // agenda para a próxima meia-noite e repete a cada 24h
+  // agenda para a próxima meia-noite (e repete a cada 24h)
   const now = new Date();
   const midnight = new Date(now);
   midnight.setHours(24, 0, 0, 0);
   const msUntilMidnight = midnight.getTime() - now.getTime();
+  const startWhen = Date.now() + Math.max(msUntilMidnight, 60_000); // no mínimo 1 min para evitar disparo imediato
 
   await chrome.alarms.create(ALARM_NAMES.DAILY_SYNC, {
-    when: Date.now() + msUntilMidnight,
-    periodInMinutes: 60 * 24,
-  });
-
-  chrome.alarms.onAlarm.addListener(async (alarm) => {
-    if (alarm.name === ALARM_NAMES.DAILY_SYNC) {
-      console.log("[v0] Daily sync triggered: clearing time limit session rules.");
-      await clearAllTimeLimitSessionRules();
-      // (opcional) compactar DAILY_USAGE aqui se desejar
-    }
+    when: startWhen,
+    periodInMinutes: 24 * 60,
   });
 
   console.log(
-    `[v0] Daily sync scheduled in ${(msUntilMidnight / 60000).toFixed(1)} minutes, then every 24h.`
+    `[v0] Daily sync scheduled in ${(startWhen - Date.now()) / 60000 >> 0} minutes, then every 24h.`
   );
+
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name !== ALARM_NAMES.DAILY_SYNC) return;
+    console.log("[v0] Daily sync triggered: clearing time limit session rules.");
+    await clearAllTimeLimitSessionRules();
+  });
 }
 
 async function clearAllTimeLimitSessionRules() {
@@ -66,31 +62,28 @@ async function clearAllTimeLimitSessionRules() {
     STORAGE_KEYS.TIME_LIMITS
   );
 
-  if (!timeLimits || timeLimits.length === 0) return;
+  if (!Array.isArray(timeLimits) || timeLimits.length === 0) return;
 
-  const idsToRemove = (timeLimits as TimeLimitEntry[]).map((entry) =>
-    generateLimitRuleId(entry.domain)
-  );
+  const ids = (timeLimits as TimeLimitEntry[]).map((e) => generateLimitRuleId(e.domain));
 
-  if (idsToRemove.length) {
+  if (ids.length) {
     try {
-      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: idsToRemove });
-      console.log(`[v0] Cleared ${idsToRemove.length} time limit session rules.`);
+      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids });
+      console.log(`[v0] Cleared ${ids.length} time limit session rules.`);
     } catch (e) {
       console.error("[v0] Error clearing time limit session rules:", e);
     }
   }
 }
 
-// -------------------------
-// Usage Tracker
-// -------------------------
+// ---- Inicialização do rastreador de uso (idempotente) ----
 export async function initializeUsageTracker() {
   if (usageInitialized) return;
   usageInitialized = true;
 
   console.log("[v0] Initializing usage tracker module");
 
+  // agenda o batimento do tracker
   await chrome.alarms.clear(ALARM_NAMES.USAGE_TRACKER);
   await chrome.alarms.create(ALARM_NAMES.USAGE_TRACKER, {
     periodInMinutes: USAGE_TRACKER_INTERVAL,
@@ -106,11 +99,14 @@ export async function initializeUsageTracker() {
   chrome.tabs.onUpdated.addListener(handleTabUpdate);
   chrome.windows.onFocusChanged.addListener(handleWindowFocusChange);
 
-  await restoreTracking();
+  await restoreTracking(); // tenta rastrear a aba ativa atual
 }
 
+// ---- Listeners de aba/janela ----
 async function handleTabActivation(activeInfo: chrome.tabs.TabActiveInfo) {
+  // fecha período anterior (se houver) antes de mudar
   await recordActiveTabUsage();
+
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
     await startTrackingTab(tab.id, tab.url);
@@ -156,6 +152,7 @@ async function startTrackingTab(tabId: number | undefined, url: string | undefin
     await stopTracking();
     return;
   }
+
   activeTabId = tabId;
   const trackingInfo = {
     url,
@@ -169,7 +166,7 @@ async function stopTracking() {
   await chrome.storage.session.remove(STORAGE_KEYS.CURRENTLY_TRACKING);
 }
 
-// Registra o uso acumulado no domínio atual e verifica limites
+// ---- Coração do tracker: registra uso e aplica limites ----
 async function recordActiveTabUsage() {
   const result = await chrome.storage.session.get(STORAGE_KEYS.CURRENTLY_TRACKING);
   const trackingInfo = result[STORAGE_KEYS.CURRENTLY_TRACKING];
@@ -184,7 +181,7 @@ async function recordActiveTabUsage() {
 
   const timeSpent = Math.floor((Date.now() - trackingInfo.startTime) / 1000);
 
-  // reinicia janela de medição
+  // reinicia período
   trackingInfo.startTime = Date.now();
   await chrome.storage.session.set({ [STORAGE_KEYS.CURRENTLY_TRACKING]: trackingInfo });
 
@@ -195,7 +192,9 @@ async function recordActiveTabUsage() {
     STORAGE_KEYS.DAILY_USAGE
   );
 
-  if (!dailyUsage[today]) dailyUsage[today] = {};
+  if (!dailyUsage[today]) {
+    dailyUsage[today] = {};
+  }
   dailyUsage[today][domain] = (dailyUsage[today][domain] || 0) + timeSpent;
 
   await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
@@ -204,10 +203,11 @@ async function recordActiveTabUsage() {
 
   await notifyStateUpdate();
 
+  // aplica/atualiza bloqueio por limite de tempo, se necessário
   await checkTimeLimit(domain, dailyUsage[today][domain]);
 }
 
-// Aplica/atualiza regra de sessão se o limite foi excedido
+// ---- Verifica limite e aplica regra de sessão se excedido ----
 async function checkTimeLimit(domain: string, totalSecondsToday: number) {
   const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(
     STORAGE_KEYS.TIME_LIMITS
@@ -216,27 +216,28 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
   if (!limit) return;
 
   const limitSeconds = limit.limitMinutes * 60;
-
   if (totalSecondsToday >= limitSeconds) {
     const ruleId = generateLimitRuleId(domain);
 
     try {
       await chrome.declarativeNetRequest.updateSessionRules({
-        removeRuleIds: [ruleId], // remove antes para idempotência
+        removeRuleIds: [ruleId], // remove se já existir
         addRules: [
           {
             id: ruleId,
             priority: 3,
-            action: { type: "block" as chrome.declarativeNetRequest.RuleActionType },
+            action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
             condition: {
               urlFilter: `||${domain}`,
-              resourceTypes: ["main_frame" as chrome.declarativeNetRequest.ResourceType],
+              resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
             },
           },
         ],
       });
 
-      console.log(`[v0] Time limit reached for ${domain}. Session block rule ${ruleId} added.`);
+      console.log(
+        `[v0] Time limit reached for ${domain}. Session block rule ${ruleId} added.`
+      );
 
       if (await notificationsAllowed()) {
         chrome.notifications.create(`limit-exceeded-${domain}`, {
@@ -252,64 +253,58 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
   }
 }
 
-// -------------------------
-// API chamada pelo message-handler
-// -------------------------
+// ---- API pública chamada pela UI (message-handler) ----
 export async function setTimeLimit(domain: string, limitMinutes: number) {
-  const d = normalizeDomain(domain);
-  if (!d) return;
+  const normalizedDomain = normalizeDomain(domain);
+  if (!normalizedDomain) return;
 
   const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(
     STORAGE_KEYS.TIME_LIMITS
   );
-  const list = timeLimits as TimeLimitEntry[];
 
-  const existingIndex = list.findIndex((e) => e.domain === d);
-  const ruleId = generateLimitRuleId(d);
+  const list = Array.isArray(timeLimits) ? (timeLimits as TimeLimitEntry[]) : [];
+  const existingIndex = list.findIndex((e) => e.domain === normalizedDomain);
+  const ruleId = generateLimitRuleId(normalizedDomain);
 
   if (limitMinutes > 0) {
+    // adiciona/atualiza
     if (existingIndex >= 0) {
       list[existingIndex].limitMinutes = limitMinutes;
     } else {
-      list.push({ domain: d, limitMinutes });
+      list.push({ domain: normalizedDomain, limitMinutes });
     }
-    console.log("[v0] Time limit set/updated:", d, limitMinutes, "minutes");
 
-    // Se já excedeu hoje, aplica a regra de sessão imediatamente
+    // se já excedeu hoje, aplica regra agora; se não, garante que não fique regra presa
     const today = new Date().toISOString().split("T")[0];
     const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(
       STORAGE_KEYS.DAILY_USAGE
     );
-    const currentUsage = dailyUsage[today]?.[d] || 0;
+    const used = dailyUsage?.[today]?.[normalizedDomain] || 0;
 
-    if (currentUsage >= limitMinutes * 60) {
-      await checkTimeLimit(d, currentUsage);
+    if (used >= limitMinutes * 60) {
+      await checkTimeLimit(normalizedDomain, used);
     } else {
-      // Remover eventual regra de sessão antiga se o limite foi aumentado
       try {
         await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
-        console.log(
-          `[v0] Removed session block rule ${ruleId} for ${d} (limit increased/updated).`
-        );
-      } catch (e) {
-        // pode não existir — tudo bem
-        console.warn(`[v0] No prior session rule to remove for ${d}:`, e?.toString?.());
+      } catch {
+        // ok se já não existir
       }
     }
   } else {
-    // Remover limite
+    // remover limite (<= 0)
     if (existingIndex >= 0) {
       list.splice(existingIndex, 1);
-      console.log("[v0] Time limit removed for:", d);
       try {
         await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
-        console.log(`[v0] Removed session block rule ${ruleId} for ${d}.`);
-      } catch (e) {
-        console.warn(`[v0] No prior session rule to remove for ${d}:`, e?.toString?.());
+      } catch {
+        // ok se não existir
       }
+      console.log(`[v0] Time limit removed for: ${normalizedDomain}`);
     }
   }
 
   await chrome.storage.local.set({ [STORAGE_KEYS.TIME_LIMITS]: list });
   await notifyStateUpdate();
+
+  console.log("[v0] Time limit set/updated:", normalizedDomain, limitMinutes, "minutes");
 }

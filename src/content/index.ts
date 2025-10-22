@@ -1,39 +1,46 @@
 import type { Message, ContentAnalysisResult } from "../shared/types";
 import { MAX_TEXT_LENGTH, STORAGE_KEYS } from "../shared/constants";
 
-console.log("[v0] Content script loaded");
+// ─────────────────────────────────────────────────────────────
+// Anti-reinjeção: marca que o CS já está presente
+// ─────────────────────────────────────────────────────────────
+;(window as any).v0ContentScriptInjected = true;
+
+console.log("[v0][CS] Content script loaded");
 
 // Evita múltiplas análises na mesma navegação
 let hasAnalyzed = false;
 
-// Recebe mensagens do Service Worker (ex.: TOGGLE_ZEN_MODE)
-chrome.runtime.onMessage.addListener(
-  (message: Message, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
-    if (message.type === "TOGGLE_ZEN_MODE") {
+// ─────────────────────────────────────────────────────────────
+// Listener robusto de mensagens vindas do Service Worker
+// ─────────────────────────────────────────────────────────────
+chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
+  try {
+    if (message?.type === "TOGGLE_ZEN_MODE") {
       toggleZenMode(message.payload?.preset);
-      sendResponse({ success: true });
+      sendResponse?.({ success: true });
+      return true; // mantém a porta aberta caso algo seja async
     }
-    return true; // mantém canal aberto para respostas assíncronas (boa prática)
+  } catch (e) {
+    console.warn("[v0][CS] TOGGLE_ZEN_MODE failed:", e);
+    sendResponse?.({ success: false, error: String(e) });
   }
-);
+  return false;
+});
 
+// ─────────────────────────────────────────────────────────────
+// Análise de conteúdo com guard p/ não rodar múltiplas vezes
+// ─────────────────────────────────────────────────────────────
 const analyzePageContent = async () => {
   if (hasAnalyzed) return;
   hasAnalyzed = true;
-
   try {
     const text = document.body?.innerText?.slice(0, MAX_TEXT_LENGTH) ?? "";
-    const url = window.location.href;
+    const url = location.href;
     const result = await analyzeText(text, url);
-
-    chrome.runtime.sendMessage({
-      type: "CONTENT_ANALYSIS_RESULT",
-      payload: result,
-    } as Message);
-
-    console.log("[v0] Content analyzed:", result.classification);
-  } catch (error) {
-    console.error("[v0] Error analyzing content:", error);
+    await chrome.runtime.sendMessage({ type: "CONTENT_ANALYSIS_RESULT", payload: result } as Message);
+  } catch (e) {
+    console.error("[v0][CS] analyzePageContent error:", e);
   }
 };
 
@@ -44,7 +51,9 @@ if (document.readyState === "complete" || document.readyState === "interactive")
   document.addEventListener("DOMContentLoaded", analyzePageContent, { once: true });
 }
 
-// --- Scoring simples de conteúdo com keywords das settings ---
+// ─────────────────────────────────────────────────────────────
+// Scoring simples de conteúdo com keywords do usuário
+// ─────────────────────────────────────────────────────────────
 async function analyzeText(text: string, url: string): Promise<ContentAnalysisResult> {
   const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
   const productiveKeywords: string[] = settings?.productiveKeywords || [];
@@ -83,55 +92,81 @@ async function analyzeText(text: string, url: string): Promise<ContentAnalysisRe
   };
 }
 
-// --- Zen Mode ---
+// ─────────────────────────────────────────────────────────────
+// Zen Mode (idempotente)
+// ─────────────────────────────────────────────────────────────
 let zenModeActive = false;
 let originalContent: string | null = null;
 let originalBackground = "";
+let zenContainer: HTMLElement | null = null;
 
 function toggleZenMode(preset?: string) {
   if (zenModeActive) {
-    // Restore
+    // Restaurar estado original
     if (originalContent !== null) {
       document.body.innerHTML = originalContent;
       document.body.style.background = originalBackground;
       originalContent = null;
+      originalBackground = "";
     }
+
+    if (zenContainer) {
+      zenContainer.remove();
+      zenContainer = null;
+    }
+
     zenModeActive = false;
-    console.log("[v0] Zen Mode deactivated");
+    console.log("[v0][CS] Zen Mode deactivated");
   } else {
-    // Activate
+    // Salvar estado atual e ativar
     originalContent = document.body.innerHTML;
-    originalBackground = document.body.style.background;
+    originalBackground = document.body.style.background || "";
     applyZenMode(preset);
     zenModeActive = true;
-    console.log("[v0] Zen Mode activated");
+    console.log("[v0][CS] Zen Mode activated");
   }
 }
 
 function applyZenMode(preset?: string) {
-  const mainContent = extractMainContent();
+  try {
+    const mainContent = extractMainContent();
 
-  if (preset) {
-    applyPreset(preset);
+    if (preset) {
+      // aplica preset antes de reescrever o body
+      void applyPreset(preset);
+    }
+
+    // Remove container anterior, se existir
+    if (zenContainer) {
+      zenContainer.remove();
+    }
+
+    zenContainer = document.createElement("div");
+    zenContainer.id = "zen-mode-container";
+    zenContainer.style.cssText = `
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      font-family: Georgia, serif;
+      font-size: 18px;
+      line-height: 1.6;
+      color: #333;
+      background: #fff;
+    `;
+    zenContainer.innerHTML = mainContent;
+
+    document.body.innerHTML = "";
+    document.body.appendChild(zenContainer);
+    document.body.style.background = "#f5f5f5";
+  } catch (e) {
+    console.error("[v0][CS] Error applying Zen Mode:", e);
+    // Tenta restaurar o estado original em caso de erro
+    if (originalContent !== null) {
+      document.body.innerHTML = originalContent;
+      document.body.style.background = originalBackground;
+    }
+    throw e; // será capturado pelo listener de mensagem
   }
-
-  const zenContainer = document.createElement("div");
-  zenContainer.id = "zen-mode-container";
-  zenContainer.style.cssText = `
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 40px 20px;
-    font-family: Georgia, serif;
-    font-size: 18px;
-    line-height: 1.6;
-    color: #333;
-    background: #fff;
-  `;
-  zenContainer.innerHTML = mainContent;
-
-  document.body.innerHTML = "";
-  document.body.appendChild(zenContainer);
-  document.body.style.background = "#f5f5f5";
 }
 
 function extractMainContent(): string {
@@ -148,14 +183,18 @@ function extractMainContent(): string {
 }
 
 async function applyPreset(presetDomain: string) {
-  const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } = await chrome.storage.local.get(
-    STORAGE_KEYS.SITE_CUSTOMIZATIONS
-  );
-  const preset = siteCustomizations?.[presetDomain];
+  try {
+    const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } = await chrome.storage.local.get(
+      STORAGE_KEYS.SITE_CUSTOMIZATIONS
+    );
+    const preset = siteCustomizations?.[presetDomain];
 
-  if (preset?.selectorsToRemove) {
-    preset.selectorsToRemove.forEach((selector: string) => {
-      document.querySelectorAll(selector).forEach((el) => el.remove());
-    });
+    if (preset?.selectorsToRemove) {
+      preset.selectorsToRemove.forEach((selector: string) => {
+        document.querySelectorAll(selector).forEach((el) => el.remove());
+      });
+    }
+  } catch (e) {
+    console.warn("[v0][CS] applyPreset failed:", e);
   }
 }

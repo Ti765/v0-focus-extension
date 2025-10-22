@@ -1,31 +1,58 @@
 import type { Message, AppState } from "../../shared/types";
-import { STORAGE_KEYS, DEFAULT_POMODORO_CONFIG, DEFAULT_SETTINGS } from "../../shared/constants";
+import {
+  STORAGE_KEYS,
+  DEFAULT_POMODORO_CONFIG,
+  DEFAULT_SETTINGS,
+} from "../../shared/constants";
 import { addToBlacklist, removeFromBlacklist } from "./blocker";
 import { startPomodoro, stopPomodoro } from "./pomodoro";
 import { setTimeLimit } from "./usage-tracker";
 import { handleContentAnalysisResult } from "./content-analyzer";
 
-/** Notifica todas as partes da UI sobre uma mudança no estado global. */
+/** Notifica todas as UIs (popup/options) que o state mudou */
 export async function notifyStateUpdate() {
   try {
     const appState = await getAppState();
-    chrome.runtime.sendMessage({ type: "STATE_UPDATED", payload: appState });
+    // broadcast: use callback and check chrome.runtime.lastError to avoid
+    // noisy "Receiving end does not exist" when no UI is open.
+    chrome.runtime.sendMessage({ type: "STATE_UPDATED", payload: appState }, () => {
+      const err = chrome.runtime.lastError;
+      if (err && !/Receiving end does not exist/.test(err.message || "")) {
+        console.warn("[v0] notifyStateUpdate lastError:", err.message);
+      }
+    });
+    // Also push to any connected ports (popup/options) for more reliable updates.
+    try {
+      // connectedPorts is populated by chrome.runtime.onConnect below.
+      for (const port of connectedPorts) {
+        try {
+          port.postMessage({ type: "STATE_UPDATED", payload: appState });
+        } catch (e) {
+          // ignore per-port failures; cleanup will occur on disconnect
+          console.warn("[v0] Failed to post state to port:", e);
+        }
+      }
+    } catch (e) {
+      // Defensive: do not fail notify flow due to port posting
+    }
   } catch (error) {
     console.error("[v0] Error notifying state update:", error);
   }
 }
 
+/** Leitura de settings para gate de notificações (usado por outros módulos) */
 export async function notificationsAllowed(): Promise<boolean> {
   try {
-    const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
-    return (settings?.notificationsEnabled !== false);
-  } catch (e) {
-    // If anything goes wrong, default to true to avoid silently dropping important alerts in early stages.
+    const { [STORAGE_KEYS.SETTINGS]: settings } =
+      await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+    // default: true (para não suprimir alertas caso falhe leitura)
+    return settings?.notificationsEnabled !== false;
+  } catch {
     return true;
   }
 }
 
-/** Busca e consolida o estado completo da aplicação. */
+/** Agrega todo o estado atual da extensão */
 export async function getAppState(): Promise<AppState> {
   const localKeys = [
     STORAGE_KEYS.BLACKLIST,
@@ -34,87 +61,165 @@ export async function getAppState(): Promise<AppState> {
     STORAGE_KEYS.POMODORO_STATUS,
     STORAGE_KEYS.SITE_CUSTOMIZATIONS,
   ];
+
   const [local, sync] = await Promise.all([
     chrome.storage.local.get(localKeys),
-    chrome.storage.sync.get(STORAGE_KEYS.SETTINGS)
+    chrome.storage.sync.get(STORAGE_KEYS.SETTINGS),
   ]);
-  
+
   return {
     blacklist: local[STORAGE_KEYS.BLACKLIST] || [],
     timeLimits: local[STORAGE_KEYS.TIME_LIMITS] || [],
     dailyUsage: local[STORAGE_KEYS.DAILY_USAGE] || {},
-    pomodoro: local[STORAGE_KEYS.POMODORO_STATUS] || { state: "IDLE", timeRemaining: 0, currentCycle: 0, config: DEFAULT_POMODORO_CONFIG },
+    pomodoro:
+      local[STORAGE_KEYS.POMODORO_STATUS] || {
+        state: "IDLE",
+        timeRemaining: 0,
+        currentCycle: 0,
+        config: DEFAULT_POMODORO_CONFIG,
+      },
     siteCustomizations: local[STORAGE_KEYS.SITE_CUSTOMIZATIONS] || {},
     settings: sync[STORAGE_KEYS.SETTINGS] || DEFAULT_SETTINGS,
   };
 }
 
-export async function handleMessage(message: Message, _sender: chrome.runtime.MessageSender): Promise<any> {
+// ----------------
+// Port-based messaging (Opção B)
+// ----------------
+// We maintain a Set of connected Ports so the SW can push state updates directly
+// to open popups/options without relying on chrome.runtime.sendMessage.
+const connectedPorts = new Set<chrome.runtime.Port>();
+
+if (chrome.runtime?.onConnect?.addListener) {
+  chrome.runtime.onConnect.addListener((port) => {
+    try {
+      // Accept only ports from extension pages (optional filtering by name)
+      connectedPorts.add(port);
+
+      // Send initial state immediately to the newly connected port
+      getAppState()
+        .then((st) => {
+          try {
+            port.postMessage({ type: "STATE_UPDATED", payload: st });
+          } catch (e) {
+            // ignore
+          }
+        })
+        .catch(() => {
+          // ignore
+        });
+
+      port.onDisconnect.addListener(() => {
+        connectedPorts.delete(port);
+      });
+    } catch (e) {
+      // defensive: if anything goes wrong, ensure port is not left referenced
+      try {
+        connectedPorts.delete(port);
+      } catch {
+        // noop
+      }
+    }
+  });
+}
+
+/** Roteador central de mensagens oriundas do popup/options/content */
+export async function handleMessage(
+  message: Message,
+  _sender: chrome.runtime.MessageSender
+): Promise<any> {
   switch (message.type) {
-    case "GET_INITIAL_STATE":
+    case "GET_INITIAL_STATE": {
       return await getAppState();
+    }
 
-    case "ADD_TO_BLACKLIST":
-      await addToBlacklist(message.payload.domain);
+    case "ADD_TO_BLACKLIST": {
+      await addToBlacklist(message.payload?.domain);
       return { success: true };
+    }
 
-    case "REMOVE_FROM_BLACKLIST":
-      await removeFromBlacklist(message.payload.domain);
+    case "REMOVE_FROM_BLACKLIST": {
+      await removeFromBlacklist(message.payload?.domain);
       return { success: true };
+    }
 
-    case "START_POMODORO":
+    case "START_POMODORO": {
       await startPomodoro(message.payload);
       return { success: true };
+    }
 
-    case "STOP_POMODORO":
+    case "STOP_POMODORO": {
       await stopPomodoro();
       return { success: true };
+    }
 
-    case "SET_TIME_LIMIT":
-      await setTimeLimit(message.payload.domain, message.payload.limitMinutes);
+    case "SET_TIME_LIMIT": {
+      await setTimeLimit(message.payload?.domain, message.payload?.limitMinutes);
       return { success: true };
+    }
 
-    case "CONTENT_ANALYSIS_RESULT":
+    case "CONTENT_ANALYSIS_RESULT": {
       await handleContentAnalysisResult(message.payload);
       return { success: true };
+    }
 
     case "UPDATE_SETTINGS": {
-      // CORREÇÃO: Garante que 'settings' não seja undefined ao fazer o spread.
-      const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
-      const updatedSettings = { ...(settings ?? {}), ...message.payload };
+      const { [STORAGE_KEYS.SETTINGS]: settings } =
+        await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+      const updatedSettings = { ...(settings ?? {}), ...(message.payload ?? {}) };
       await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: updatedSettings });
       await notifyStateUpdate();
       return { success: true };
     }
-      
+
     case "SITE_CUSTOMIZATION_UPDATED": {
-      // CORREÇÃO: Garante que 'siteCustomizations' não seja undefined ao fazer o spread.
-      const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } = await chrome.storage.local.get(STORAGE_KEYS.SITE_CUSTOMIZATIONS);
-      const updatedCustomizations = { ...(siteCustomizations ?? {}), ...message.payload };
-      await chrome.storage.local.set({ [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: updatedCustomizations });
+      const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } =
+        await chrome.storage.local.get(STORAGE_KEYS.SITE_CUSTOMIZATIONS);
+      const updatedCustomizations = {
+        ...(siteCustomizations ?? {}),
+        ...(message.payload ?? {}),
+      };
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: updatedCustomizations,
+      });
       await notifyStateUpdate();
       return { success: true };
     }
-      
-    case "STATE_UPDATED":
-      console.warn(`[v0] Received a 'STATE_UPDATED' message from a client, which should not happen.`);
-      return { success: false, error: "Invalid message type received." };
 
     case "TOGGLE_ZEN_MODE": {
+      // Envia ao content script da aba ativa (pode falhar em páginas protegidas)
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
         try {
-          // CORREÇÃO: Adicionado try/catch para lidar com páginas que não podem receber mensagens.
-          await chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_ZEN_MODE", payload: message.payload });
+          await chrome.tabs.sendMessage(tab.id, {
+            type: "TOGGLE_ZEN_MODE",
+            payload: message.payload,
+          });
         } catch (error) {
-            console.warn(`[v0] Could not send message to tab ${tab.id}. It might be a protected page or the content script is not injected.`, error);
+          // Evita derrubar o SW em páginas que não aceitam mensagens
+          console.warn(
+            `[v0] Could not send TOGGLE_ZEN_MODE to tab ${tab.id}. ` +
+              `It may be a protected page or the content script wasn't injected.`,
+            error
+          );
+          // Retornamos sucesso para não quebrar a UI; a ação simplesmente não ocorreu.
         }
       }
       return { success: true };
     }
 
-    default:
-      const exhaustiveCheck: never = message.type;
+    case "STATE_UPDATED": {
+      // Não deve vir de clientes; logamos para visibilidade
+      console.warn(
+        "[v0] Received a 'STATE_UPDATED' message from a client, which should not happen."
+      );
+      return { success: false, error: "Invalid message type received." };
+    }
+
+    default: {
+      // Checagem exaustiva em tempo de compilação
+      const exhaustiveCheck: never = message.type as never;
       throw new Error(`Unknown message type: ${exhaustiveCheck}`);
+    }
   }
 }

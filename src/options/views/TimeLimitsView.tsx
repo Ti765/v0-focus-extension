@@ -6,36 +6,21 @@ import type { TimeLimitEntry } from "../../shared/types";
 import { normalizeDomain } from "../../shared/url";
 import { useStore } from "../../popup/store"; // mantém a mesma store do popup
 
-// Ajuda a tipar chrome em build web (preview)
-declare const chrome: any;
-
-// Encapsula sendMessage com tratamento de erro/lastError
-function sendMessageAsync<T = unknown>(msg: any): Promise<T> {
-  return new Promise((resolve, reject) => {
-    if (!chrome?.runtime?.id) {
-      reject(new Error("Extensão não está rodando (chrome.runtime.id ausente)."));
-      return;
-    }
-    chrome.runtime.sendMessage(msg, (response: any) => {
-      const err = chrome.runtime.lastError;
-      if (err) return reject(new Error(err.message));
-      if (response && response.error) return reject(new Error(response.error));
-      resolve(response);
-    });
-  });
-}
+// Usa o store compartilhado do popup para todas as mensagens/ações
 
 export default function TimeLimitsView() {
   // consome estado e utilitários do store (para refletir updates do SW)
-  const { timeLimits, loadState, listenForUpdates } = useStore((s) => ({
+  const { timeLimits, loadState, listenForUpdates, setTimeLimit, error, setError } = useStore((s) => ({
     timeLimits: s.timeLimits,
     loadState: s.loadState,
     listenForUpdates: s.listenForUpdates,
+    setTimeLimit: s.setTimeLimit,
+    error: s.error,
+    setError: s.setError,
   }));
 
   const [newDomain, setNewDomain] = useState("");
   const [newLimit, setNewLimit] = useState<number>(60);
-  const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,10 +52,7 @@ export default function TimeLimitsView() {
     }
 
     try {
-      await sendMessageAsync({
-        type: "SET_TIME_LIMIT",
-        payload: { domain, limitMinutes },
-      });
+      await setTimeLimit(domain, limitMinutes);
       setSuccessMessage(
         limitMinutes > 0
           ? `Limite para ${domain} definido/atualizado para ${limitMinutes} min.`
@@ -80,20 +62,28 @@ export default function TimeLimitsView() {
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (e: any) {
       console.error("[v0] Error setting time limit:", e);
-      setError(e?.message || "Falha ao definir o limite de tempo.");
+      // O store já define setError; apenas garanta mensagem local se necessário
+      if (!error) setError(e?.message || "Falha ao definir o limite de tempo.");
     }
   }
 
   async function addTimeLimit() {
-    await setTimeLimitAction(newDomain, newLimit);
-    if (!error) {
+    try {
+      await setTimeLimitAction(newDomain, newLimit);
+      // clear inputs on success
       setNewDomain("");
       setNewLimit(60);
+    } catch (e) {
+      // store will set error — nothing else to do here
     }
   }
 
   async function removeTimeLimit(domain: string) {
-    await setTimeLimitAction(domain, 0);
+    try {
+      await setTimeLimitAction(domain, 0);
+    } catch (e) {
+      // store sets error
+    }
   }
 
   function onDomainKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

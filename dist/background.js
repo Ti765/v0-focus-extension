@@ -1,1 +1,731 @@
-const a={BLACKLIST:"blacklist",TIME_LIMITS:"timeLimits",DAILY_USAGE:"dailyUsage",POMODORO_STATUS:"pomodoroStatus",SITE_CUSTOMIZATIONS:"siteCustomizations",SETTINGS:"settings",CURRENTLY_TRACKING:"currentlyTracking"},l={POMODORO:"pomodoroAlarm",USAGE_TRACKER:"usageTrackerAlarm",DAILY_SYNC:"dailySyncAlarm"},M={analyticsConsent:!1,productiveKeywords:["tutorial","documentation","study","learn","course","education","research","guide","reference","manual"],distractingKeywords:["news","entertainment","game","social","video","trending","viral","celebrity","gossip","meme"],notificationsEnabled:!0},y={focusMinutes:25,breakMinutes:5,longBreakMinutes:15,cyclesBeforeLongBreak:4,adaptiveMode:!1},Y=.5,$=1;function S(e){if(!e)return"";let t=e.trim();try{return new URL(t.startsWith("http")?t:`https://${t}`).hostname.replace(/^www\./,"")}catch{return t.split("/")[0].replace(/^www\./,"")}}function U(e){if(!e)return"";try{return new URL(e).hostname.replace(/^www\./,"")}catch{return S(e)}}let O=null,D=!1,b=!1;const z=3e3;function L(e){let t=0;for(let o=0;o<e.length;o++){const i=e.charCodeAt(o);t=(t<<5)-t+i,t|=0}return z+Math.abs(t)%1e3}async function F(){if(b)return;b=!0,console.log("[v0] Initializing daily sync for session rules..."),await chrome.alarms.clear(l.DAILY_SYNC);const e=new Date,t=new Date(e);t.setHours(24,0,0,0);const o=t.getTime()-e.getTime();await chrome.alarms.create(l.DAILY_SYNC,{when:Date.now()+o,periodInMinutes:60*24}),chrome.alarms.onAlarm.addListener(async i=>{i.name===l.DAILY_SYNC&&(console.log("[v0] Daily sync triggered: clearing time limit session rules."),await x())}),console.log(`[v0] Daily sync scheduled in ${(o/6e4).toFixed(1)} minutes, then every 24h.`)}async function x(){const{[a.TIME_LIMITS]:e=[]}=await chrome.storage.local.get(a.TIME_LIMITS);if(!e||e.length===0)return;const t=e.map(o=>L(o.domain));if(t.length)try{await chrome.declarativeNetRequest.updateSessionRules({removeRuleIds:t}),console.log(`[v0] Cleared ${t.length} time limit session rules.`)}catch(o){console.error("[v0] Error clearing time limit session rules:",o)}}async function j(){D||(D=!0,console.log("[v0] Initializing usage tracker module"),await chrome.alarms.clear(l.USAGE_TRACKER),await chrome.alarms.create(l.USAGE_TRACKER,{periodInMinutes:$}),chrome.alarms.onAlarm.addListener(async e=>{e.name===l.USAGE_TRACKER&&await w()}),chrome.tabs.onActivated.addListener(q),chrome.tabs.onUpdated.addListener(W),chrome.windows.onFocusChanged.addListener(Z),await N())}async function q(e){await w();try{const t=await chrome.tabs.get(e.tabId);await R(t.id,t.url)}catch(t){console.warn(`[v0] Could not get tab info for tabId: ${e.tabId}`,t),await f()}}async function W(e,t){e===O&&t.url&&(await w(),await R(e,t.url))}async function Z(e){e===chrome.windows.WINDOW_ID_NONE?(await w(),await f()):await N()}async function N(){const[e]=await chrome.tabs.query({active:!0,currentWindow:!0});e?.id&&e.url?await R(e.id,e.url):await f()}async function R(e,t){if(!e||!t||t.startsWith("chrome://")||t.startsWith("chrome-extension://")||t.startsWith("about:")){await f();return}O=e;const o={url:t,startTime:Date.now()};await chrome.storage.session.set({[a.CURRENTLY_TRACKING]:o})}async function f(){O=null,await chrome.storage.session.remove(a.CURRENTLY_TRACKING)}async function w(){const t=(await chrome.storage.session.get(a.CURRENTLY_TRACKING))[a.CURRENTLY_TRACKING];if(!t||!t.url||!t.startTime)return;const o=U(t.url);if(!o){await f();return}const i=Math.floor((Date.now()-t.startTime)/1e3);if(t.startTime=Date.now(),await chrome.storage.session.set({[a.CURRENTLY_TRACKING]:t}),i<1)return;const n=new Date().toISOString().split("T")[0],{[a.DAILY_USAGE]:s={}}=await chrome.storage.local.get(a.DAILY_USAGE);s[n]||(s[n]={}),s[n][o]=(s[n][o]||0)+i,await chrome.storage.local.set({[a.DAILY_USAGE]:s}),console.log("[v0] Recorded usage:",o,i,"seconds"),await d(),await k(o,s[n][o])}async function k(e,t){const{[a.TIME_LIMITS]:o=[]}=await chrome.storage.local.get(a.TIME_LIMITS),i=o.find(s=>s.domain===e);if(!i)return;const n=i.limitMinutes*60;if(t>=n){const s=L(e);try{await chrome.declarativeNetRequest.updateSessionRules({removeRuleIds:[s],addRules:[{id:s,priority:3,action:{type:"block"},condition:{urlFilter:`||${e}`,resourceTypes:["main_frame"]}}]}),console.log(`[v0] Time limit reached for ${e}. Session block rule ${s} added.`),await J()&&chrome.notifications.create(`limit-exceeded-${e}`,{type:"basic",iconUrl:"icons/icon48.png",title:"Limite de Tempo Atingido",message:`Você atingiu o limite de ${i.limitMinutes} minutos em ${e} hoje.`})}catch(c){console.error(`[v0] Error updating session rule for time limit on ${e}:`,c)}}}async function V(e,t){const o=S(e);if(!o)return;const{[a.TIME_LIMITS]:i=[]}=await chrome.storage.local.get(a.TIME_LIMITS),n=i,s=n.findIndex(u=>u.domain===o),c=L(o);if(t>0){s>=0?n[s].limitMinutes=t:n.push({domain:o,limitMinutes:t}),console.log("[v0] Time limit set/updated:",o,t,"minutes");const u=new Date().toISOString().split("T")[0],{[a.DAILY_USAGE]:r={}}=await chrome.storage.local.get(a.DAILY_USAGE),m=r[u]?.[o]||0;if(m>=t*60)await k(o,m);else try{await chrome.declarativeNetRequest.updateSessionRules({removeRuleIds:[c]}),console.log(`[v0] Removed session block rule ${c} for ${o} (limit increased/updated).`)}catch(I){console.warn(`[v0] No prior session rule to remove for ${o}:`,I?.toString?.())}}else if(s>=0){n.splice(s,1),console.log("[v0] Time limit removed for:",o);try{await chrome.declarativeNetRequest.updateSessionRules({removeRuleIds:[c]}),console.log(`[v0] Removed session block rule ${c} for ${o}.`)}catch(u){console.warn(`[v0] No prior session rule to remove for ${o}:`,u?.toString?.())}}await chrome.storage.local.set({[a.TIME_LIMITS]:n}),await d()}async function H(){console.log("[v0] Initializing content analyzer module")}async function Q(e){console.log("[v0] Content analysis result:",e);const{[a.SETTINGS]:t}=await chrome.storage.sync.get(a.SETTINGS);if(t?.notificationsEnabled&&e.classification==="distracting"&&e.score>Y){const o=U(e.url);if(!o)return;const{[a.BLACKLIST]:i=[]}=await chrome.storage.local.get(a.BLACKLIST);if(i.some(s=>s.domain===o))return;chrome.notifications.create(`suggest-block-${o}`,{type:"basic",iconUrl:"icons/icon48.png",title:"Site Potencialmente Distrativo",message:`${o} parece ser distrativo. Deseja adicioná-lo à sua lista de bloqueio?`,buttons:[{title:"Sim, bloquear"},{title:"Não, obrigado"}]})}}async function d(){try{const e=await P();chrome.runtime.sendMessage({type:"STATE_UPDATED",payload:e})}catch(e){console.error("[v0] Error notifying state update:",e)}}async function J(){try{const{[a.SETTINGS]:e}=await chrome.storage.sync.get(a.SETTINGS);return e?.notificationsEnabled!==!1}catch{return!0}}async function P(){const e=[a.BLACKLIST,a.TIME_LIMITS,a.DAILY_USAGE,a.POMODORO_STATUS,a.SITE_CUSTOMIZATIONS],[t,o]=await Promise.all([chrome.storage.local.get(e),chrome.storage.sync.get(a.SETTINGS)]);return{blacklist:t[a.BLACKLIST]||[],timeLimits:t[a.TIME_LIMITS]||[],dailyUsage:t[a.DAILY_USAGE]||{},pomodoro:t[a.POMODORO_STATUS]||{state:"IDLE",timeRemaining:0,currentCycle:0,config:y},siteCustomizations:t[a.SITE_CUSTOMIZATIONS]||{},settings:o[a.SETTINGS]||M}}async function X(e,t){switch(e.type){case"GET_INITIAL_STATE":return await P();case"ADD_TO_BLACKLIST":return await B(e.payload.domain),{success:!0};case"REMOVE_FROM_BLACKLIST":return await oe(e.payload.domain),{success:!0};case"START_POMODORO":return await ne(e.payload),{success:!0};case"STOP_POMODORO":return await se(),{success:!0};case"SET_TIME_LIMIT":return await V(e.payload.domain,e.payload.limitMinutes),{success:!0};case"CONTENT_ANALYSIS_RESULT":return await Q(e.payload),{success:!0};case"UPDATE_SETTINGS":{const{[a.SETTINGS]:i}=await chrome.storage.sync.get(a.SETTINGS),n={...i??{},...e.payload};return await chrome.storage.sync.set({[a.SETTINGS]:n}),await d(),{success:!0}}case"SITE_CUSTOMIZATION_UPDATED":{const{[a.SITE_CUSTOMIZATIONS]:i}=await chrome.storage.local.get(a.SITE_CUSTOMIZATIONS),n={...i??{},...e.payload};return await chrome.storage.local.set({[a.SITE_CUSTOMIZATIONS]:n}),await d(),{success:!0}}case"STATE_UPDATED":return console.warn("[v0] Received a 'STATE_UPDATED' message from a client, which should not happen."),{success:!1,error:"Invalid message type received."};case"TOGGLE_ZEN_MODE":{const[i]=await chrome.tabs.query({active:!0,currentWindow:!0});if(i?.id)try{await chrome.tabs.sendMessage(i.id,{type:"TOGGLE_ZEN_MODE",payload:e.payload})}catch(n){console.warn(`[v0] Could not send message to tab ${i.id}. It might be a protected page or the content script is not injected.`,n)}return{success:!0}}default:const o=e.type;throw new Error(`Unknown message type: ${o}`)}}const A=1e3,T=2e3,h=1e3,ee=e=>{let t=0;for(let o=0;o<e.length;o++){const i=e.charCodeAt(o);t=(t<<5)-t+i,t|=0}return T+Math.abs(t)%h};let p=Promise.resolve();function E(e){return p=p.then(e,e),p}async function te(){console.log("[v0] Initializing blocker module"),await v()}async function B(e){const o=(await chrome.storage.local.get(a.BLACKLIST))[a.BLACKLIST]??[],i=S(e);if(!i)return;if(o.some(s=>s.domain===i)){console.log("[v0] Domain already in blacklist:",i);return}const n=[...o,{domain:i,addedAt:Date.now()}];await chrome.storage.local.set({[a.BLACKLIST]:n}),await v(),await d(),console.log("[v0] Added to blacklist:",i)}async function oe(e){const o=(await chrome.storage.local.get(a.BLACKLIST))[a.BLACKLIST]??[],i=S(e);if(!i)return;const n=o.filter(s=>s.domain!==i);n.length!==o.length&&(await chrome.storage.local.set({[a.BLACKLIST]:n}),await v(),await d(),console.log("[v0] Removed from blacklist:",i))}async function v(){const{[a.BLACKLIST]:e=[]}=await chrome.storage.local.get(a.BLACKLIST);return E(async()=>{const o=(await chrome.declarativeNetRequest.getDynamicRules()).filter(r=>r.id>=T&&r.id<T+h),i=new Set(o.map(r=>r.id)),n=new Map;for(const r of o){const m=r.condition?.urlFilter;m&&n.set(m,r.id)}const s=new Set,c=[];for(const r of e){const m=S(r.domain),I=`||${m}`,_=n.get(I);if(_!=null){s.add(_);continue}let g=ee(m);for(;i.has(g)||s.has(g);)if(g++,g>=T+h&&(g=T),s.size>=h){console.error("[v0] Blacklist rule ID range appears to be full. Skipping:",m),g=-1;break}g!==-1&&(s.add(g),c.push({id:g,priority:1,action:{type:"block"},condition:{urlFilter:I,resourceTypes:["main_frame"]}}))}const u=o.map(r=>r.id).filter(r=>!s.has(r));c.length||u.length?(await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:u,addRules:c}),console.log("[v0] User blocking rules synced:",c.length,"rules added,",u.length,"rules removed.")):console.log("[v0] User blocking rules already in sync.")})}async function ae(){const{[a.BLACKLIST]:e=[]}=await chrome.storage.local.get(a.BLACKLIST);if(!e.length){console.log("[v0] No sites in blacklist to block for Pomodoro.");return}const t=e.map((o,i)=>{const n=S(o.domain);return{id:A+i,priority:2,action:{type:"block"},condition:{urlFilter:`||${n}`,resourceTypes:["main_frame"]}}});return E(async()=>{const i=(await chrome.declarativeNetRequest.getDynamicRules()).map(n=>n.id).filter(n=>n>=A&&n<T);await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:i,addRules:t}),console.log("[v0] Enabling Pomodoro blocking for",e.length,"sites.")})}async function G(){return E(async()=>{const t=(await chrome.declarativeNetRequest.getDynamicRules()).map(o=>o.id).filter(o=>o>=A&&o<T);t.length&&(await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:t}),console.log("[v0] Pomodoro blocking disabled. Removed",t.length,"rules."))})}async function ie(){console.log("[v0] Initializing Pomodoro module"),chrome.alarms.onAlarm.addListener(async e=>{e.name===l.POMODORO&&await ce()})}async function ne(e){const{[a.POMODORO_STATUS]:t}=await chrome.storage.local.get(a.POMODORO_STATUS),o={...t?.config||y,...e},i={state:"FOCUS",startTime:Date.now(),timeRemaining:o.focusMinutes*60,currentCycle:(t?.currentCycle||0)+1,config:o};await chrome.storage.local.set({[a.POMODORO_STATUS]:i}),await chrome.alarms.create(l.POMODORO,{delayInMinutes:o.focusMinutes}),await ae(),await d(),o.notificationsEnabled&&chrome.notifications.create("pomodoro-start",{type:"basic",iconUrl:"icons/icon48.png",title:"Pomodoro Iniciado",message:`Foco por ${o.focusMinutes} minutos. Mantenha o foco!`}),console.log("[v0] Pomodoro started:",i)}async function se(){const{[a.POMODORO_STATUS]:e}=await chrome.storage.local.get(a.POMODORO_STATUS),t={state:"IDLE",timeRemaining:0,currentCycle:0,config:e?.config||y,startTime:void 0};await chrome.storage.local.set({[a.POMODORO_STATUS]:t}),await chrome.alarms.clear(l.POMODORO),await G(),await d(),console.log("[v0] Pomodoro stopped")}async function ce(){const{[a.POMODORO_STATUS]:e}=await chrome.storage.local.get(a.POMODORO_STATUS);if(e){if(e.state==="FOCUS"){const o=e.currentCycle%e.config.cyclesBeforeLongBreak===0?e.config.longBreakMinutes:e.config.breakMinutes,i={...e,state:"BREAK",startTime:Date.now(),timeRemaining:o*60};await chrome.storage.local.set({[a.POMODORO_STATUS]:i}),await chrome.alarms.create(l.POMODORO,{delayInMinutes:o}),await G(),await d(),e.config.notificationsEnabled&&chrome.notifications.create("pomodoro-break",{type:"basic",iconUrl:"icons/icon48.png",title:"Pausa!",message:`Descanse por ${o} minutos. Você merece!`}),console.log("[v0] Pomodoro: Focus → Break")}else if(e.state==="BREAK"){e.config.adaptiveMode&&e.currentCycle%e.config.cyclesBeforeLongBreak===0&&(e.config.focusMinutes+=5,console.log("[v0] Adaptive mode: Focus time increased to",e.config.focusMinutes));const t={...e,state:"IDLE",timeRemaining:0,startTime:void 0};await chrome.storage.local.set({[a.POMODORO_STATUS]:t}),await d(),e.config.notificationsEnabled&&chrome.notifications.create("pomodoro-cycle-complete",{type:"basic",iconUrl:"icons/icon48.png",title:"Ciclo Completo!",message:"Pronto para outra sessão de foco?"}),console.log("[v0] Pomodoro: Break → Idle")}}}async function re(){console.log("[v0] Initializing Firebase sync module");const{[a.SETTINGS]:e}=await chrome.storage.sync.get(a.SETTINGS);if(!e?.analyticsConsent){console.log("[v0] Analytics consent not given, skipping Firebase sync");return}await chrome.alarms.create(l.DAILY_SYNC,{periodInMinutes:1440}),chrome.alarms.onAlarm.addListener(async t=>{t.name===l.DAILY_SYNC&&await le()})}async function le(){console.log("[v0] Daily sync triggered (Firebase integration pending)");const{[a.DAILY_USAGE]:e={}}=await chrome.storage.local.get(a.DAILY_USAGE),t=new Date().toISOString().split("T")[0],o=e[t];if(!o)return;const i=Object.values(o).reduce((s,c)=>s+c,0),n=Object.entries(o).sort(([,s],[,c])=>c-s).slice(0,5).map(([s,c])=>({domain:s,time:c}));console.log("[v0] Daily summary:",{totalTime:i,topSites:n})}console.log("[v0] Service Worker starting up...");async function K(){await ie(),await te(),await j(),await F(),await H(),await re()}async function C(){try{console.log("[v0] Attempting to inject content scripts into existing tabs.");const e=await chrome.tabs.query({url:["http://*/*","https://*/*"]});for(const t of e)if(t.id)try{const o=await chrome.scripting.executeScript({target:{tabId:t.id},func:()=>globalThis.v0ContentScriptInjected===!0});Array.isArray(o)&&o[0]?.result===!0||(await chrome.scripting.executeScript({target:{tabId:t.id},files:["content.js"]}),await chrome.scripting.executeScript({target:{tabId:t.id},func:()=>{globalThis.v0ContentScriptInjected=!0}}),console.log(`[v0] Injected content script into tab ${t.id}`))}catch(o){const i=String(o?.message||o);i.includes("Cannot access contents of url")||i.includes("No matching signature")||i.includes("Cannot access a chrome:// URL")||i.includes("The extensions gallery cannot be scripted")||console.error(`[v0] Failed to inject script into tab ${t.id}:`,o)}}catch(e){console.error("[v0] Unexpected error while injecting content scripts:",e)}}chrome.runtime.onInstalled.addListener(async e=>{if(console.log("[v0] Extension installed/updated:",e.reason),e.reason==="install"){const t={blacklist:[],timeLimits:[],dailyUsage:{},siteCustomizations:{},settings:M},o={state:"IDLE",timeRemaining:0,currentCycle:0,config:y};await chrome.storage.local.set({[a.BLACKLIST]:t.blacklist,[a.TIME_LIMITS]:t.timeLimits,[a.DAILY_USAGE]:t.dailyUsage,[a.SITE_CUSTOMIZATIONS]:t.siteCustomizations,[a.POMODORO_STATUS]:o}),await chrome.storage.sync.set({[a.SETTINGS]:t.settings}),console.log("[v0] Initial state created"),await C()}e.reason==="update"&&await C(),await K()});chrome.runtime.onStartup.addListener(async()=>{console.log("[v0] Extension started on browser startup"),await K()});chrome.runtime.onMessage.addListener((e,t,o)=>(console.log("[v0] Message received:",e?.type,e?.payload),X(e).then(o).catch(i=>{console.error("[v0] Error handling message:",i),o({error:i?.message??String(i)})}),!0));chrome.notifications.onButtonClicked.addListener(async(e,t)=>{if(console.log("[v0] Notification button clicked:",e,t),e.startsWith("suggest-block-")&&t===0){const o=e.replace("suggest-block-","");o&&(await B(o),console.log(`[v0] Added ${o} to blacklist from notification.`))}chrome.notifications.clear(e)});console.log("[v0] Service Worker loaded and listeners attached.");
+const i = {
+  BLACKLIST: "blacklist",
+  TIME_LIMITS: "timeLimits",
+  DAILY_USAGE: "dailyUsage",
+  POMODORO_STATUS: "pomodoroStatus",
+  SITE_CUSTOMIZATIONS: "siteCustomizations",
+  SETTINGS: "settings",
+  CURRENTLY_TRACKING: "currentlyTracking"
+  // Chave para persistir a aba ativa na sessão
+}, l = {
+  POMODORO: "pomodoroAlarm",
+  USAGE_TRACKER: "usageTrackerAlarm",
+  DAILY_SYNC: "dailySyncAlarm"
+}, b = {
+  analyticsConsent: !1,
+  productiveKeywords: [
+    "tutorial",
+    "documentation",
+    "study",
+    "learn",
+    "course",
+    "education",
+    "research",
+    "guide",
+    "reference",
+    "manual"
+  ],
+  distractingKeywords: [
+    "news",
+    "entertainment",
+    "game",
+    "social",
+    "video",
+    "trending",
+    "viral",
+    "celebrity",
+    "gossip",
+    "meme"
+  ],
+  notificationsEnabled: !0
+}, S = {
+  focusMinutes: 25,
+  breakMinutes: 5,
+  longBreakMinutes: 15,
+  cyclesBeforeLongBreak: 4,
+  adaptiveMode: !1
+}, F = 0.5, z = 1;
+function T(e) {
+  if (!e) return "";
+  let t = e.trim();
+  try {
+    return new URL(t.startsWith("http") ? t : `https://${t}`).hostname.replace(/^www\./, "");
+  } catch {
+    return t.split("/")[0].replace(/^www\./, "");
+  }
+}
+function U(e) {
+  if (!e) return "";
+  try {
+    return new URL(e).hostname.replace(/^www\./, "");
+  } catch {
+    return T(e);
+  }
+}
+let p = null, D = !1, M = !1;
+const $ = 3e3, q = 1e3;
+function R(e) {
+  let t = 0;
+  for (let a = 0; a < e.length; a++) {
+    const n = e.charCodeAt(a);
+    t = (t << 5) - t + n, t |= 0;
+  }
+  const o = Math.abs(t) % q;
+  return $ + o;
+}
+async function x() {
+  if (M) return;
+  M = !0, console.log("[v0] Initializing daily sync for session rules..."), await chrome.alarms.clear(l.DAILY_SYNC);
+  const e = /* @__PURE__ */ new Date(), t = new Date(e);
+  t.setHours(24, 0, 0, 0);
+  const o = t.getTime() - e.getTime(), a = Date.now() + Math.max(o, 6e4);
+  await chrome.alarms.create(l.DAILY_SYNC, {
+    when: a,
+    periodInMinutes: 24 * 60
+  }), console.log(
+    `[v0] Daily sync scheduled in ${(a - Date.now()) / 6e4 >> 0} minutes, then every 24h.`
+  ), chrome.alarms.onAlarm.addListener(async (n) => {
+    n.name === l.DAILY_SYNC && (console.log("[v0] Daily sync triggered: clearing time limit session rules."), await j());
+  });
+}
+async function j() {
+  const { [i.TIME_LIMITS]: e = [] } = await chrome.storage.local.get(
+    i.TIME_LIMITS
+  );
+  if (!Array.isArray(e) || e.length === 0) return;
+  const t = e.map((o) => R(o.domain));
+  if (t.length)
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: t }), console.log(`[v0] Cleared ${t.length} time limit session rules.`);
+    } catch (o) {
+      console.error("[v0] Error clearing time limit session rules:", o);
+    }
+}
+async function W() {
+  D || (D = !0, console.log("[v0] Initializing usage tracker module"), await chrome.alarms.clear(l.USAGE_TRACKER), await chrome.alarms.create(l.USAGE_TRACKER, {
+    periodInMinutes: z
+  }), chrome.alarms.onAlarm.addListener(async (e) => {
+    e.name === l.USAGE_TRACKER && await f();
+  }), chrome.tabs.onActivated.addListener(Z), chrome.tabs.onUpdated.addListener(H), chrome.windows.onFocusChanged.addListener(V), await N());
+}
+async function Z(e) {
+  await f();
+  try {
+    const t = await chrome.tabs.get(e.tabId);
+    await E(t.id, t.url);
+  } catch (t) {
+    console.warn(`[v0] Could not get tab info for tabId: ${e.tabId}`, t), await y();
+  }
+}
+async function H(e, t) {
+  e === p && t.url && (await f(), await E(e, t.url));
+}
+async function V(e) {
+  e === chrome.windows.WINDOW_ID_NONE ? (await f(), await y()) : await N();
+}
+async function N() {
+  const [e] = await chrome.tabs.query({ active: !0, currentWindow: !0 });
+  e?.id && e.url ? await E(e.id, e.url) : await y();
+}
+async function E(e, t) {
+  if (!e || !t || t.startsWith("chrome://") || t.startsWith("chrome-extension://") || t.startsWith("about:")) {
+    await y();
+    return;
+  }
+  p = e;
+  const o = {
+    url: t,
+    startTime: Date.now()
+  };
+  await chrome.storage.session.set({ [i.CURRENTLY_TRACKING]: o });
+}
+async function y() {
+  p = null, await chrome.storage.session.remove(i.CURRENTLY_TRACKING);
+}
+async function f() {
+  const t = (await chrome.storage.session.get(i.CURRENTLY_TRACKING))[i.CURRENTLY_TRACKING];
+  if (!t || !t.url || !t.startTime) return;
+  const o = U(t.url);
+  if (!o) {
+    await y();
+    return;
+  }
+  const a = Math.floor((Date.now() - t.startTime) / 1e3);
+  if (t.startTime = Date.now(), await chrome.storage.session.set({ [i.CURRENTLY_TRACKING]: t }), a < 1) return;
+  const n = (/* @__PURE__ */ new Date()).toISOString().split("T")[0], { [i.DAILY_USAGE]: s = {} } = await chrome.storage.local.get(
+    i.DAILY_USAGE
+  );
+  s[n] || (s[n] = {}), s[n][o] = (s[n][o] || 0) + a, await chrome.storage.local.set({ [i.DAILY_USAGE]: s }), console.log("[v0] Recorded usage:", o, a, "seconds"), await u(), await k(o, s[n][o]);
+}
+async function k(e, t) {
+  const { [i.TIME_LIMITS]: o = [] } = await chrome.storage.local.get(
+    i.TIME_LIMITS
+  ), a = o.find((s) => s.domain === e);
+  if (!a) return;
+  const n = a.limitMinutes * 60;
+  if (t >= n) {
+    const s = R(e);
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({
+        removeRuleIds: [s],
+        // remove se já existir
+        addRules: [
+          {
+            id: s,
+            priority: 3,
+            action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
+            condition: {
+              urlFilter: `||${e}`,
+              resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME]
+            }
+          }
+        ]
+      }), console.log(
+        `[v0] Time limit reached for ${e}. Session block rule ${s} added.`
+      ), await B() && chrome.notifications.create(`limit-exceeded-${e}`, {
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Limite de Tempo Atingido",
+        message: `Você atingiu o limite de ${a.limitMinutes} minutos em ${e} hoje.`
+      });
+    } catch (c) {
+      console.error(`[v0] Error updating session rule for time limit on ${e}:`, c);
+    }
+  }
+}
+async function Q(e, t) {
+  const o = T(e);
+  if (!o) return;
+  const { [i.TIME_LIMITS]: a = [] } = await chrome.storage.local.get(
+    i.TIME_LIMITS
+  ), n = Array.isArray(a) ? a : [], s = n.findIndex((d) => d.domain === o), c = R(o);
+  if (t > 0) {
+    s >= 0 ? n[s].limitMinutes = t : n.push({ domain: o, limitMinutes: t });
+    const d = (/* @__PURE__ */ new Date()).toISOString().split("T")[0], { [i.DAILY_USAGE]: r = {} } = await chrome.storage.local.get(
+      i.DAILY_USAGE
+    ), v = r?.[d]?.[o] || 0;
+    if (v >= t * 60)
+      await k(o, v);
+    else
+      try {
+        await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [c] });
+      } catch {
+      }
+  } else if (s >= 0) {
+    n.splice(s, 1);
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [c] });
+    } catch {
+    }
+    console.log(`[v0] Time limit removed for: ${o}`);
+  }
+  await chrome.storage.local.set({ [i.TIME_LIMITS]: n }), await u(), console.log("[v0] Time limit set/updated:", o, t, "minutes");
+}
+const g = "__contentSuggestNotified__", P = 3 * 60 * 60 * 1e3;
+async function J() {
+  console.log("[v0] Initializing content analyzer module");
+  try {
+    const { [g]: e = {} } = await chrome.storage.session.get(g), t = Date.now();
+    let o = !1;
+    for (const a of Object.keys(e || {}))
+      (typeof e[a] != "number" || t - e[a] > P) && (delete e[a], o = !0);
+    o && await chrome.storage.session.set({ [g]: e });
+  } catch (e) {
+    console.warn("[v0] Unable to prune notify cache:", e);
+  }
+}
+async function X(e) {
+  try {
+    const { [g]: t = {} } = await chrome.storage.session.get(g), o = t?.[e], a = Date.now();
+    return o && a - o < P ? !1 : (await chrome.storage.session.set({
+      [g]: { ...t || {}, [e]: a }
+    }), !0);
+  } catch {
+    return !0;
+  }
+}
+async function ee(e) {
+  try {
+    if (console.log("[v0] Content analysis result:", e), !await B() || !(e.classification === "distracting" && e.score > F))
+      return;
+    const t = U(e.url);
+    if (!t) return;
+    const { [i.BLACKLIST]: o = [] } = await chrome.storage.local.get(
+      i.BLACKLIST
+    );
+    if (o.some((s) => s.domain === t) || !await X(t))
+      return;
+    const n = `suggest-block-${t}`;
+    await chrome.notifications.create(n, {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title: "Site Potencialmente Distrativo",
+      message: `${t} parece ser distrativo. Deseja adicioná-lo à sua lista de bloqueio?`,
+      buttons: [{ title: "Sim, bloquear" }, { title: "Não, obrigado" }]
+      // Você pode manter a notificação até interação do usuário, se quiser:
+      // requireInteraction: true,
+      // priority: 0,
+    });
+  } catch (t) {
+    console.error("[v0] Error while handling content analysis result:", t);
+  }
+}
+async function u() {
+  try {
+    const e = await L();
+    chrome.runtime.sendMessage({ type: "STATE_UPDATED", payload: e }, () => {
+      const t = chrome.runtime.lastError;
+      t && !/Receiving end does not exist/.test(t.message || "") && console.warn("[v0] notifyStateUpdate lastError:", t.message);
+    });
+    try {
+      for (const t of h)
+        try {
+          t.postMessage({ type: "STATE_UPDATED", payload: e });
+        } catch (o) {
+          console.warn("[v0] Failed to post state to port:", o);
+        }
+    } catch {
+    }
+  } catch (e) {
+    console.error("[v0] Error notifying state update:", e);
+  }
+}
+async function B() {
+  try {
+    const { [i.SETTINGS]: e } = await chrome.storage.sync.get(i.SETTINGS);
+    return e?.notificationsEnabled !== !1;
+  } catch {
+    return !0;
+  }
+}
+async function L() {
+  const e = [
+    i.BLACKLIST,
+    i.TIME_LIMITS,
+    i.DAILY_USAGE,
+    i.POMODORO_STATUS,
+    i.SITE_CUSTOMIZATIONS
+  ], [t, o] = await Promise.all([
+    chrome.storage.local.get(e),
+    chrome.storage.sync.get(i.SETTINGS)
+  ]);
+  return {
+    blacklist: t[i.BLACKLIST] || [],
+    timeLimits: t[i.TIME_LIMITS] || [],
+    dailyUsage: t[i.DAILY_USAGE] || {},
+    pomodoro: t[i.POMODORO_STATUS] || {
+      state: "IDLE",
+      timeRemaining: 0,
+      currentCycle: 0,
+      config: S
+    },
+    siteCustomizations: t[i.SITE_CUSTOMIZATIONS] || {},
+    settings: o[i.SETTINGS] || b
+  };
+}
+const h = /* @__PURE__ */ new Set();
+chrome.runtime?.onConnect?.addListener && chrome.runtime.onConnect.addListener((e) => {
+  try {
+    h.add(e), L().then((t) => {
+      try {
+        e.postMessage({ type: "STATE_UPDATED", payload: t });
+      } catch {
+      }
+    }).catch(() => {
+    }), e.onDisconnect.addListener(() => {
+      h.delete(e);
+    });
+  } catch {
+    try {
+      h.delete(e);
+    } catch {
+    }
+  }
+});
+async function te(e, t) {
+  switch (e.type) {
+    case "GET_INITIAL_STATE":
+      return await L();
+    case "ADD_TO_BLACKLIST":
+      return await G(e.payload?.domain), { success: !0 };
+    case "REMOVE_FROM_BLACKLIST":
+      return await ie(e.payload?.domain), { success: !0 };
+    case "START_POMODORO":
+      return await ce(e.payload), { success: !0 };
+    case "STOP_POMODORO":
+      return await re(), { success: !0 };
+    case "SET_TIME_LIMIT":
+      return await Q(e.payload?.domain, e.payload?.limitMinutes), { success: !0 };
+    case "CONTENT_ANALYSIS_RESULT":
+      return await ee(e.payload), { success: !0 };
+    case "UPDATE_SETTINGS": {
+      const { [i.SETTINGS]: o } = await chrome.storage.sync.get(i.SETTINGS), a = { ...o ?? {}, ...e.payload ?? {} };
+      return await chrome.storage.sync.set({ [i.SETTINGS]: a }), await u(), { success: !0 };
+    }
+    case "SITE_CUSTOMIZATION_UPDATED": {
+      const { [i.SITE_CUSTOMIZATIONS]: o } = await chrome.storage.local.get(i.SITE_CUSTOMIZATIONS), a = {
+        ...o ?? {},
+        ...e.payload ?? {}
+      };
+      return await chrome.storage.local.set({
+        [i.SITE_CUSTOMIZATIONS]: a
+      }), await u(), { success: !0 };
+    }
+    case "TOGGLE_ZEN_MODE": {
+      const [o] = await chrome.tabs.query({ active: !0, currentWindow: !0 });
+      if (o?.id)
+        try {
+          await chrome.tabs.sendMessage(o.id, {
+            type: "TOGGLE_ZEN_MODE",
+            payload: e.payload
+          });
+        } catch (a) {
+          console.warn(
+            `[v0] Could not send TOGGLE_ZEN_MODE to tab ${o.id}. It may be a protected page or the content script wasn't injected.`,
+            a
+          );
+        }
+      return { success: !0 };
+    }
+    case "STATE_UPDATED":
+      return console.warn(
+        "[v0] Received a 'STATE_UPDATED' message from a client, which should not happen."
+      ), { success: !1, error: "Invalid message type received." };
+    default: {
+      const o = e.type;
+      throw new Error(`Unknown message type: ${o}`);
+    }
+  }
+}
+const I = 1e3, m = 2e3, A = 1e3;
+let w = Promise.resolve();
+function O(e) {
+  return w = w.then(e, e), w;
+}
+function oe(e) {
+  let t = 0;
+  for (let a = 0; a < e.length; a++) {
+    const n = e.charCodeAt(a);
+    t = (t << 5) - t + n, t |= 0;
+  }
+  const o = Math.abs(t) % A;
+  return m + o;
+}
+async function ae() {
+  console.log("[v0] Initializing blocker module"), await _();
+}
+async function G(e) {
+  const o = (await chrome.storage.local.get(
+    i.BLACKLIST
+  ))[i.BLACKLIST] ?? [], a = T(e);
+  if (!a) return;
+  if (o.some((s) => s.domain === a)) {
+    console.log("[v0] Domain already in blacklist:", a);
+    return;
+  }
+  const n = [
+    ...o,
+    { domain: a, addedAt: Date.now() }
+  ];
+  await chrome.storage.local.set({ [i.BLACKLIST]: n }), await _(), await u(), console.log("[v0] Added to blacklist:", a);
+}
+async function ie(e) {
+  const o = (await chrome.storage.local.get(
+    i.BLACKLIST
+  ))[i.BLACKLIST] ?? [], a = T(e);
+  if (!a) return;
+  const n = o.filter((s) => s.domain !== a);
+  n.length !== o.length && (await chrome.storage.local.set({ [i.BLACKLIST]: n }), await _(), await u(), console.log("[v0] Removed from blacklist:", a));
+}
+async function _() {
+  const { [i.BLACKLIST]: e = [] } = await chrome.storage.local.get(
+    i.BLACKLIST
+  );
+  return O(async () => {
+    const t = await chrome.declarativeNetRequest.getDynamicRules(), o = new Set(
+      t.map((c) => c.id).filter(
+        (c) => c >= m && c < m + A
+      )
+    ), a = [], n = /* @__PURE__ */ new Set();
+    for (const c of e) {
+      const d = T(c.domain);
+      if (!d) continue;
+      let r = oe(d);
+      for (; (n.has(r) || o.has(r)) && (r++, r >= m + A && (r = m), n.has(r) || o.has(r), !(!n.has(r) && !o.has(r))); )
+        ;
+      n.add(r), o.has(r) || a.push({
+        id: r,
+        priority: 1,
+        action: {
+          type: chrome.declarativeNetRequest.RuleActionType.BLOCK
+        },
+        condition: {
+          urlFilter: `||${d}`,
+          resourceTypes: [
+            chrome.declarativeNetRequest.ResourceType.MAIN_FRAME
+          ]
+        }
+      });
+    }
+    const s = Array.from(o).filter(
+      (c) => !n.has(c)
+    );
+    a.length > 0 || s.length > 0 ? (await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: s,
+      addRules: a
+    }), console.log(
+      "[v0] User blocking rules synced:",
+      a.length,
+      "rules added,",
+      s.length,
+      "rules removed."
+    )) : console.log("[v0] User blocking rules already in sync.");
+  });
+}
+async function ne() {
+  const { [i.BLACKLIST]: e = [] } = await chrome.storage.local.get(
+    i.BLACKLIST
+  );
+  if (!Array.isArray(e) || e.length === 0) {
+    console.log("[v0] No sites in blacklist to block for Pomodoro.");
+    return;
+  }
+  const t = e.map(
+    (o, a) => {
+      const n = T(o.domain);
+      return {
+        id: I + a,
+        // sequência simples e previsível
+        priority: 2,
+        // acima das regras de usuário
+        action: {
+          type: chrome.declarativeNetRequest.RuleActionType.BLOCK
+        },
+        condition: {
+          urlFilter: `||${n}`,
+          resourceTypes: [
+            chrome.declarativeNetRequest.ResourceType.MAIN_FRAME
+          ]
+        }
+      };
+    }
+  );
+  return O(async () => {
+    const a = (await chrome.declarativeNetRequest.getDynamicRules()).map((n) => n.id).filter((n) => n >= I && n < m);
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: a,
+      addRules: t
+    }), console.log(
+      "[v0] Enabling Pomodoro blocking for",
+      e.length,
+      "sites."
+    );
+  });
+}
+async function K() {
+  return O(async () => {
+    const t = (await chrome.declarativeNetRequest.getDynamicRules()).map((o) => o.id).filter((o) => o >= I && o < m);
+    t.length > 0 && (await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: t
+    }), console.log(
+      "[v0] Pomodoro blocking disabled. Removed",
+      t.length,
+      "rules."
+    ));
+  });
+}
+async function se() {
+  console.log("[v0] Initializing Pomodoro module"), chrome.alarms.onAlarm.addListener(async (e) => {
+    e.name === l.POMODORO && await le();
+  });
+}
+async function ce(e) {
+  const { [i.POMODORO_STATUS]: t } = await chrome.storage.local.get(i.POMODORO_STATUS), o = { ...t?.config || S, ...e }, a = {
+    state: "FOCUS",
+    startTime: Date.now(),
+    timeRemaining: o.focusMinutes * 60,
+    currentCycle: (t?.currentCycle || 0) + 1,
+    config: o
+  };
+  await chrome.storage.local.set({ [i.POMODORO_STATUS]: a }), await chrome.alarms.create(l.POMODORO, { delayInMinutes: o.focusMinutes }), await ne(), await u(), o.notificationsEnabled && chrome.notifications.create("pomodoro-start", {
+    type: "basic",
+    iconUrl: "icons/icon48.png",
+    title: "Pomodoro Iniciado",
+    message: `Foco por ${o.focusMinutes} minutos. Mantenha o foco!`
+  }), console.log("[v0] Pomodoro started:", a);
+}
+async function re() {
+  const { [i.POMODORO_STATUS]: e } = await chrome.storage.local.get(i.POMODORO_STATUS), t = {
+    state: "IDLE",
+    timeRemaining: 0,
+    currentCycle: 0,
+    // Reseta o ciclo ao parar
+    config: e?.config || S,
+    startTime: void 0
+  };
+  await chrome.storage.local.set({ [i.POMODORO_STATUS]: t }), await chrome.alarms.clear(l.POMODORO), await K(), await u(), console.log("[v0] Pomodoro stopped");
+}
+async function le() {
+  const { [i.POMODORO_STATUS]: e } = await chrome.storage.local.get(i.POMODORO_STATUS);
+  if (e) {
+    if (e.state === "FOCUS") {
+      const o = e.currentCycle % e.config.cyclesBeforeLongBreak === 0 ? e.config.longBreakMinutes : e.config.breakMinutes, a = { ...e, state: "BREAK", startTime: Date.now(), timeRemaining: o * 60 };
+      await chrome.storage.local.set({ [i.POMODORO_STATUS]: a }), await chrome.alarms.create(l.POMODORO, { delayInMinutes: o }), await K(), await u(), e.config.notificationsEnabled && chrome.notifications.create("pomodoro-break", {
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Pausa!",
+        message: `Descanse por ${o} minutos. Você merece!`
+      }), console.log("[v0] Pomodoro: Focus → Break");
+    } else if (e.state === "BREAK") {
+      e.config.adaptiveMode && e.currentCycle % e.config.cyclesBeforeLongBreak === 0 && (e.config.focusMinutes += 5, console.log("[v0] Adaptive mode: Focus time increased to", e.config.focusMinutes));
+      const t = { ...e, state: "IDLE", timeRemaining: 0, startTime: void 0 };
+      await chrome.storage.local.set({ [i.POMODORO_STATUS]: t }), await u(), e.config.notificationsEnabled && chrome.notifications.create("pomodoro-cycle-complete", {
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Ciclo Completo!",
+        message: "Pronto para outra sessão de foco?"
+      }), console.log("[v0] Pomodoro: Break → Idle");
+    }
+  }
+}
+async function ue() {
+  console.log("[v0] Initializing Firebase sync module");
+  const { [i.SETTINGS]: e } = await chrome.storage.sync.get(i.SETTINGS);
+  if (!e?.analyticsConsent) {
+    console.log("[v0] Analytics consent not given, skipping Firebase sync");
+    return;
+  }
+  await chrome.alarms.create(l.DAILY_SYNC, {
+    periodInMinutes: 1440
+    // Once per day
+  }), chrome.alarms.onAlarm.addListener(async (t) => {
+    t.name === l.DAILY_SYNC && await de();
+  });
+}
+async function de() {
+  console.log("[v0] Daily sync triggered (Firebase integration pending)");
+  const { [i.DAILY_USAGE]: e = {} } = await chrome.storage.local.get(i.DAILY_USAGE), t = (/* @__PURE__ */ new Date()).toISOString().split("T")[0], o = e[t];
+  if (!o) return;
+  const a = Object.values(o).reduce((s, c) => s + c, 0), n = Object.entries(o).sort(([, s], [, c]) => c - s).slice(0, 5).map(([s, c]) => ({ domain: s, time: c }));
+  console.log("[v0] Daily summary:", { totalTime: a, topSites: n });
+}
+console.log("[v0] Service Worker starting up...");
+async function Y() {
+  try {
+    await se();
+  } catch (e) {
+    console.error("[v0] Failed to initialize Pomodoro:", e);
+  }
+  try {
+    await ae();
+  } catch (e) {
+    console.error("[v0] Failed to initialize Blocker:", e);
+  }
+  try {
+    await W();
+  } catch (e) {
+    console.error("[v0] Failed to initialize Usage Tracker:", e);
+  }
+  try {
+    await x();
+  } catch (e) {
+    console.error("[v0] Failed to initialize Daily Sync:", e);
+  }
+  try {
+    await J();
+  } catch (e) {
+    console.error("[v0] Failed to initialize Content Analyzer:", e);
+  }
+  try {
+    await ue();
+  } catch (e) {
+    console.warn("[v0] Firebase sync skipped/failed:", e);
+  }
+}
+async function C() {
+  try {
+    console.log("[v0] Attempting to inject content scripts into existing tabs.");
+    const e = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    for (const t of e)
+      if (t.id)
+        try {
+          const o = await chrome.scripting.executeScript({
+            target: { tabId: t.id },
+            func: () => globalThis.__v0ContentScriptInjected === !0
+            // em MV3, func roda na página; caso bloqueado, cairá no catch abaixo
+          });
+          Array.isArray(o) && o[0]?.result === !0 || (await chrome.scripting.executeScript({
+            target: { tabId: t.id },
+            files: ["content.js"]
+          }), await chrome.scripting.executeScript({
+            target: { tabId: t.id },
+            func: () => {
+              globalThis.__v0ContentScriptInjected = !0;
+            }
+          }), console.log(`[v0] Injected content script into tab ${t.id}`));
+        } catch (o) {
+          const a = String(o?.message ?? o);
+          a.includes("Cannot access contents of url") || a.includes("No matching signature") || a.includes("Cannot access a chrome:// URL") || a.includes("The extensions gallery cannot be scripted") || console.warn(`[v0] Failed to inject in tab ${t.id}:`, o);
+        }
+  } catch (e) {
+    console.error("[v0] Error while injecting content scripts:", e);
+  }
+}
+chrome.runtime.onInstalled.addListener(async (e) => {
+  if (console.log("[v0] Extension installed/updated:", e.reason), e.reason === "install") {
+    const t = {
+      blacklist: [],
+      timeLimits: [],
+      dailyUsage: {},
+      siteCustomizations: {},
+      settings: b
+    }, o = {
+      state: "IDLE",
+      timeRemaining: 0,
+      currentCycle: 0,
+      config: S
+    };
+    try {
+      await chrome.storage.local.set({
+        [i.BLACKLIST]: t.blacklist,
+        [i.TIME_LIMITS]: t.timeLimits,
+        [i.DAILY_USAGE]: t.dailyUsage,
+        [i.SITE_CUSTOMIZATIONS]: t.siteCustomizations,
+        [i.POMODORO_STATUS]: o
+      }), await chrome.storage.sync.set({
+        [i.SETTINGS]: t.settings
+      }), console.log("[v0] Initial state created");
+    } catch (a) {
+      console.error("[v0] Failed to create initial state:", a);
+    }
+    await C();
+  }
+  e.reason === "update" && await C(), await Y();
+});
+chrome.runtime.onStartup.addListener(async () => {
+  console.log("[v0] Extension started on browser startup"), await Y();
+});
+chrome.runtime.onMessage.addListener(
+  (e, t, o) => {
+    try {
+      return console.log("[v0] Message received:", e?.type, e?.payload), Promise.resolve(te(e, t)).then((a) => o(a)).catch((a) => {
+        console.error("[v0] Error handling message:", a), o({ error: a?.message ?? String(a) });
+      }), !0;
+    } catch (a) {
+      return console.error("[v0] onMessage top-level error:", a), o({ error: a.message }), !1;
+    }
+  }
+);
+chrome.notifications.onButtonClicked.addListener(
+  async (e, t) => {
+    try {
+      if (console.log("[v0] Notification button clicked:", e, t), e.startsWith("suggest-block-") && t === 0) {
+        const o = e.replace("suggest-block-", "");
+        o && (await G(o), console.log(`[v0] Added ${o} to blacklist from notification.`));
+      }
+    } finally {
+      chrome.notifications.clear(e);
+    }
+  }
+);
+console.log("[v0] Service Worker loaded and listeners attached.");

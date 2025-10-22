@@ -1,26 +1,23 @@
-import { defineConfig } from 'vite';
-import { resolve } from 'path';
+import { defineConfig } from "vite";
+import { resolve } from "path";
 
-// Build dedicado ao Service Worker (Manifest V3).
-// Gera UM ÚNICO ARQUIVO ESM (background.js) sem chunks externos.
+// Gera um ÚNICO arquivo ESM: dist/background.js (sem chunks)
 export default defineConfig({
-  base: '', // caminhos relativos — importante em extensões
   build: {
-    outDir: 'dist',
-    emptyOutDir: false, // a UI já gerou a pasta dist
-    target: 'es2020',
-    minify: 'esbuild',
-    rollupOptions: {
-      input: {
-        background: resolve(__dirname, 'src/background/index.ts'),
-      },
-      output: {
-        entryFileNames: 'background.js',
-        format: 'esm',
-        // impede code-splitting e quaisquer imports externos
-        inlineDynamicImports: true,
-        manualChunks: undefined,
-      },
+    outDir: "dist",
+    emptyOutDir: false, // não limpar dist (a UI já escreveu lá)
+    lib: {
+      entry: resolve(__dirname, "src/background/index.ts"),
+      name: "background",
+      formats: ["es"],
+      fileName: () => "background.js"
     },
-  },
+    rollupOptions: {
+      output: {
+        inlineDynamicImports: true
+      }
+    },
+    minify: "esbuild",
+    target: "es2020"
+  }
 });

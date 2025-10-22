@@ -3,16 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
+      http-equiv="Content-Security-Policy"
+      content="script-src 'self'; object-src 'self';"
     />
-    <title>Focus Extension - Painel</title>
-    <script type="module" crossorigin src="./assets/options.js"></script>
-    <link rel="modulepreload" crossorigin href="./assets/index.js">
-    <link rel="stylesheet" crossorigin href="./assets/options.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Focus Extension – Opções</title>
+    <script type="module" crossorigin src="/assets/options.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/index.js">
+    <link rel="stylesheet" crossorigin href="/assets/options.css">
   </head>
   <body>
     <div id="root"></div>
-    <!-- Vite vai reescrever este caminho para /assets/options.[hash].js no build -->
+    <!-- O Vite vai resolver este import para dist/assets/options.js no build -->
   </body>
 </html>

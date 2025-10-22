@@ -43,8 +43,8 @@ export default function BlacklistManager() {
       await addToBlacklist(domain); // STATE_UPDATED atualizará a lista
       setNewDomain("");
     } catch (e: any) {
-      // o store já define um erro amigável; mantém log para debug
       console.error("[v0] UI: erro ao adicionar à blacklist:", e);
+      // store already sets a user-friendly error
     } finally {
       setSubmitting(false);
     }
