@@ -1,164 +1,108 @@
-declare const chrome: any
-export const isChromeExtension = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id
-
-// Generate mock daily usage data for the last 7 days
-const generateMockDailyUsage = () => {
-  const usage: Record<string, Record<string, number>> = {}
-  const today = new Date()
-
-  for (let i = 6; i >= 0; i--) {
-    const date = new Date(today)
-    date.setDate(date.getDate() - i)
-    const dateStr = date.toISOString().split("T")[0]
-
-    usage[dateStr] = {
-      "github.com": Math.floor(Math.random() * 7200) + 3600,
-      "youtube.com": Math.floor(Math.random() * 3600) + 1800,
-      "facebook.com": Math.floor(Math.random() * 1800) + 900,
-      "twitter.com": Math.floor(Math.random() * 1200) + 600,
-      "reddit.com": Math.floor(Math.random() * 2400) + 1200,
-    }
-  }
-
-  return usage
+interface ChromeStorageArea {
+  get(keys?: string | string[] | object): Promise<any>;
+  set(items: object): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
+  clear(): Promise<void>;
 }
 
-export const createStorageChangeListener = () => {
-  const listeners = new Set<(changes: any, areaName: string) => void>();
+interface ChromeStorageChangeInfo {
+  oldValue?: any;
+  newValue?: any;
+}
+
+type StorageChangeListener = (changes: Record<string, ChromeStorageChangeInfo>, areaName: string) => void;
+
+const createStorageChangeHub = () => {
+  const listeners = new Set<StorageChangeListener>();
   return {
-    addListener: (callback: (changes: any, areaName: string) => void) => {
-      listeners.add(callback);
+    addListener: (cb: StorageChangeListener) => listeners.add(cb),
+    removeListener: (cb: StorageChangeListener) => listeners.delete(cb),
+    emit: (changes: Record<string, ChromeStorageChangeInfo>, areaName: string) => {
+      listeners.forEach((cb) => cb(changes, areaName));
     },
-    removeListener: (callback: (changes: any, areaName: string) => void) => {
-      listeners.delete(callback);
-    },
-    hasListener: (callback: (changes: any, areaName: string) => void) => {
-      return listeners.has(callback);
-    },
-    emit: (changes: any, areaName: string) => {
-      listeners.forEach(listener => listener(changes, areaName));
-    }
+    hasListeners: () => listeners.size > 0,
   };
 };
 
-export const chromeAPI = isChromeExtension
-  ? chrome
-  : {
-      runtime: {
-        onMessage: createStorageChangeListener(),
-        sendMessage: async (message: any) => {
-          console.log("[v0] Mock chrome.runtime.sendMessage:", message)
-          return {
-            blacklist: ["facebook.com", "twitter.com", "youtube.com"],
-            timeLimits: [
-              { domain: "reddit.com", limitMinutes: 30 },
-              { domain: "instagram.com", limitMinutes: 20 },
-            ],
-            dailyUsage: generateMockDailyUsage(),
-            pomodoro: {
-              state: "IDLE",
-              timeRemaining: 0,
-              currentCycle: 0,
-              config: {
-                focusMinutes: 25,
-                breakMinutes: 5,
-                longBreakMinutes: 15,
-                cyclesBeforeLongBreak: 4,
-                adaptiveMode: false,
-              },
-            },
-            zenModePresets: [],
-            settings: {
-              analyticsConsent: false,
-              productiveKeywords: ["tutorial", "documentation", "study", "learn"],
-              distractingKeywords: ["news", "entertainment", "game", "social"],
-              notificationsEnabled: true,
-            },
-          }
-        },
-      },
-      storage: {
-        local: {
-          onChanged: createStorageChangeListener(),
-          get: async (keys?: string | string[] | Record<string, any>) => {
-            console.log("[v0] Mock chrome.storage.local.get:", keys)
-            // Return mock data based on requested keys
-            const mockData: Record<string, any> = {
-              dailyUsage: generateMockDailyUsage(),
-              blacklist: ["facebook.com", "twitter.com", "youtube.com"],
-              timeLimits: {
-                "reddit.com": 1800,
-                "instagram.com": 1200,
-              },
-            }
+interface ChromeStorage {
+  local: ChromeStorageArea;
+  sync: ChromeStorageArea;
+  onChanged: { addListener: (cb: StorageChangeListener) => void; removeListener: (cb: StorageChangeListener) => void; emit: (changes: Record<string, ChromeStorageChangeInfo>, areaName: string) => void };
+}
 
-            if (typeof keys === "string") {
-              return { [keys]: mockData[keys] }
-            } else if (Array.isArray(keys)) {
-              const result: Record<string, any> = {}
-              keys.forEach((key) => {
-                result[key] = mockData[key]
-              })
-              return result
-            } else if (keys && typeof keys === "object") {
-              const result: Record<string, any> = {}
-              Object.keys(keys).forEach((key) => {
-                result[key] = mockData[key] ?? keys[key]
-              })
-              return result
-            }
-            return mockData
-          },
-          set: async (items: Record<string, any>) => {
-            console.log("[v0] Mock chrome.storage.local.set:", items)
-          },
-        },
-        sync: {
-          onChanged: createStorageChangeListener(),
-          get: async (keys?: string | string[] | Record<string, any>) => {
-            console.log("[v0] Mock chrome.storage.sync.get:", keys)
-            const mockData: Record<string, any> = {
-              blacklist: ["facebook.com", "twitter.com", "youtube.com"],
-              timeLimits: [
-                { domain: "reddit.com", limitMinutes: 30 },
-                { domain: "instagram.com", limitMinutes: 20 },
-              ],
-              siteCustomizations: {
-                "youtube.com": {
-                  hideHomepage: false,
-                  hideShorts: true,
-                  hideComments: true,
-                  hideRecommendations: false,
-                },
-              },
-              settings: {
-                theme: "dark",
-                language: "pt",
-                notificationsEnabled: true,
-                dailySummary: false,
-              },
-            }
+interface ChromeRuntime {
+  id?: string;
+  sendMessage: <T = any>(message: any, callback?: (response: T) => void) => void;
+  onMessage: { addListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void; removeListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void };
+  lastError: null | { message: string };
+}
 
-            if (typeof keys === "string") {
-              return { [keys]: mockData[keys] }
-            } else if (Array.isArray(keys)) {
-              const result: Record<string, any> = {}
-              keys.forEach((key) => {
-                result[key] = mockData[key]
-              })
-              return result
-            } else if (keys && typeof keys === "object") {
-              const result: Record<string, any> = {}
-              Object.keys(keys).forEach((key) => {
-                result[key] = mockData[key] ?? keys[key]
-              })
-              return result
-            }
-            return mockData
-          },
-          set: async (items: Record<string, any>) => {
-            console.log("[v0] Mock chrome.storage.sync.set:", items)
-          },
-        },
-      },
+declare const chrome: { runtime: ChromeRuntime; storage: ChromeStorage };
+export const isChromeExtension = typeof chrome !== "undefined" && !!(chrome as any).runtime && !!(chrome as any).runtime.id;
+
+// in-memory mock storage backing
+const makeMockStorageArea = (mem: Record<string, any>, hub: ReturnType<typeof createStorageChangeHub>, areaName: string) => ({
+  get: async (keys?: string | string[] | Record<string, any>) => {
+    if (typeof keys === "string") return { [keys]: mem[keys] };
+    if (Array.isArray(keys)) return keys.reduce((acc: Record<string, any>, k) => ((acc[k] = mem[k]), acc), {} as Record<string, any>);
+    if (keys && typeof keys === "object") return Object.keys(keys).reduce((acc: Record<string, any>, k) => ((acc[k] = mem[k] ?? (keys as any)[k]), acc), {} as Record<string, any>);
+    return { ...mem };
+  },
+  set: async (items: Record<string, any>) => {
+    const old = { ...mem };
+    Object.assign(mem, items);
+    const changes: Record<string, ChromeStorageChangeInfo> = {};
+    for (const k of Object.keys(items)) {
+      changes[k] = { oldValue: old[k], newValue: mem[k] };
     }
+    hub.emit(changes, areaName);
+  },
+  remove: async (keys: string | string[]) => {
+    const arr = Array.isArray(keys) ? keys : [keys];
+    const old = { ...mem };
+    for (const k of arr) delete mem[k];
+    const changes: Record<string, ChromeStorageChangeInfo> = {};
+    for (const k of arr) changes[k] = { oldValue: old[k], newValue: undefined };
+    hub.emit(changes, areaName);
+  },
+  clear: async () => {
+    const old = { ...mem };
+    for (const k of Object.keys(mem)) delete mem[k];
+    const changes: Record<string, ChromeStorageChangeInfo> = {};
+    for (const k of Object.keys(old)) changes[k] = { oldValue: old[k], newValue: undefined };
+    hub.emit(changes, areaName);
+  },
+});
+
+const storageHub = createStorageChangeHub();
+const localMem: Record<string, any> = {};
+const syncMem: Record<string, any> = {};
+
+const mockChromeAPI: { runtime: ChromeRuntime; storage: ChromeStorage } = {
+  runtime: {
+    id: "mock-extension-id",
+    sendMessage: (_message: any, callback?: (response: any) => void) => {
+      // very small mock: echo minimal response
+      if (callback) callback({ ok: true });
+    },
+    onMessage: {
+      addListener: () => {},
+      removeListener: () => {},
+    },
+    lastError: null,
+  },
+  storage: {
+    local: makeMockStorageArea(localMem, storageHub, "local"),
+    sync: makeMockStorageArea(syncMem, storageHub, "sync"),
+    onChanged: {
+      addListener: storageHub.addListener,
+      removeListener: storageHub.removeListener,
+      emit: storageHub.emit,
+    },
+  },
+};
+
+// (helper removed — not needed in the mock)
+
+// Export real chrome API in extension environment, mock in development
+export const chromeAPI = isChromeExtension ? chrome : mockChromeAPI;

@@ -1,18 +1,45 @@
 // src/popup/store.ts
 import { create } from "zustand";
 import type { AppState, Message } from "../shared/types";
+import { chromeAPI } from "../shared/chrome-mock";
 import { deepEqual } from "../shared/utils";
 
+// Store instance-specific message listener state using WeakMap
+type MessageListenerState = {
+  listenerCount: number;
+  processedIds: Set<string>;
+  lastStateHash: string;
+  listener?: (message: Message, sender: chrome.runtime.MessageSender, sendResponse?: (response?: any) => void) => void;
+};
+
+
+// Create a new listener state for a store instance
+function createListenerState(): MessageListenerState {
+  return {
+    listenerCount: 0,
+    processedIds: new Set<string>(),
+    lastStateHash: "",
+    listener: undefined
+  };
+}
+// (per-store listener state is defined after the exported `useStore` so it may reference its type)
+
 // ───────────────────────────────────────────────────────────────
-// Wrapper: sendMessage como Promise + tratamento de lastError
+// Utils de mensageria e deduplicação
 // ───────────────────────────────────────────────────────────────
+
+/** Wrapper (callback→Promise) com tratamento de runtime.lastError */
 function sendMessageAsync<T = any>(message: Message): Promise<T> {
-  return new Promise((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     try {
-      chrome.runtime.sendMessage(message, (response) => {
-        const err = chrome.runtime.lastError;
+      // Marque a mensagem com um ID para dedupe no receiver
+      const id = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).toString();
+      const msg: Message = { ...message, id, ts: Date.now(), source: message.source ?? "popup-ui" } as any;
+
+      // MV3 suporta Promise; porém manter callback aumenta compatibilidade
+      chromeAPI.runtime.sendMessage(msg as any, (response: T) => {
+        const err = (chromeAPI.runtime as any).lastError;
         if (err) return reject(new Error(err.message));
-        if (response?.error) return reject(new Error(response.error));
         resolve(response);
       });
     } catch (e) {
@@ -21,252 +48,273 @@ function sendMessageAsync<T = any>(message: Message): Promise<T> {
   });
 }
 
-// ───────────────────────────────────────────────────────────────
-// Tipos do store
-// ───────────────────────────────────────────────────────────────
-interface PopupStore extends AppState {
-  isLoading: boolean;
-  error: string | null;
-  loadState: () => Promise<void>;
-  listenForUpdates: () => () => void;
-  setError: (error: string | null) => void;
-  addToBlacklist: (domain: string) => Promise<void>;
-  removeFromBlacklist: (domain: string) => Promise<void>;
-  startPomodoro: (focusMinutes: number, breakMinutes: number) => Promise<void>;
-  stopPomodoro: () => Promise<void>;
-  toggleZenMode: (preset?: string) => Promise<void>;
-  setTimeLimit: (domain: string, limitMinutes: number) => Promise<void>;
+/** Stringify estável (chaves ordenadas) p/ hashing de conteúdo */
+function stableStringify(value: any): string {
+  const seen = new WeakSet();
+  const sort = (v: any): any => {
+    if (v && typeof v === "object") {
+      if (seen.has(v)) return null;
+      seen.add(v);
+      if (Array.isArray(v)) return v.map(sort);
+      return Object.keys(v)
+        .sort()
+        .reduce((acc: any, k) => {
+          acc[k] = sort(v[k]);
+          return acc;
+        }, {});
+    }
+    return v;
+  };
+  return JSON.stringify(sort(value));
+}
+
+function pickComparable(s: AppState) {
+  return {
+    blacklist: s.blacklist,
+    timeLimits: s.timeLimits,
+    dailyUsage: s.dailyUsage,
+    pomodoro: s.pomodoro,
+    siteCustomizations: s.siteCustomizations,
+    settings: s.settings,
+  };
 }
 
 // ───────────────────────────────────────────────────────────────
-// Implementação do store
+// Tipagem do store
 // ───────────────────────────────────────────────────────────────
-export const useStore = create<PopupStore>((set) => ({
-  // Estado inicial (fallback até o GET_INITIAL_STATE chegar)
+
+interface PopupStore extends AppState {
+  isLoading: boolean;
+  error: string | null;
+
+  // ciclo de vida
+  loadState: () => Promise<void>;
+  listenForUpdates: () => () => void;
+
+  // util
+  setError: (err: string | null) => void;
+
+  // ações
+  addToBlacklist: (domain: string) => Promise<void>;
+  removeFromBlacklist: (domain: string) => Promise<void>;
+  setTimeLimit: (domain: string, limitMinutes: number) => Promise<void>;
+  startPomodoro: (focusMinutes: number, breakMinutes: number) => Promise<void>;
+  stopPomodoro: () => Promise<void>;
+  toggleZenMode: (preset?: string) => Promise<void>;
+  updateSettings: (partial: Partial<AppState["settings"]>) => Promise<void>;
+}
+
+// ───────────────────────────────────────────────────────────────
+// Estado inicial (fallback até o SW hidratar)
+// ───────────────────────────────────────────────────────────────
+
+  const initialState: AppState = {
+  isLoading: false,
+  error: null,
   blacklist: [],
   timeLimits: [],
   dailyUsage: {},
-  pomodoro: {
-    state: "IDLE",
-    timeRemaining: 0,
-    currentCycle: 0,
-    config: {
-      focusMinutes: 25,
-      breakMinutes: 5,
-      longBreakMinutes: 15,
-      cyclesBeforeLongBreak: 4,
-      adaptiveMode: false,
-    },
-  },
   siteCustomizations: {},
-  settings: {
-    analyticsConsent: false,
-    productiveKeywords: [],
-    distractingKeywords: [],
-    notificationsEnabled: true,
+  pomodoro: {
+    config: { focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, cyclesBeforeLongBreak: 4, autoStartBreaks: false },
+    state: { phase: "idle", isPaused: false, cycleIndex: 0 },
   },
-  isLoading: true,
+  settings: { theme: "system", language: "pt-BR", blockMode: "soft", notifications: true, syncWithCloud: false },
+};
+
+// ───────────────────────────────────────────────────────────────
+// Store (Zustand)
+// ───────────────────────────────────────────────────────────────
+
+export const useStore = create<PopupStore>()((set, get) => ({
+  ...initialState,
+  isLoading: false,
   error: null,
 
-  // Ações base
-  setError: (error: string | null) => set({ error }),
+  setError: (error) => set({ error }),
 
+  // Hidrata via GET_INITIAL_STATE (Service Worker deve responder)
   loadState: async () => {
+    set({ isLoading: true, error: null });
     try {
-      const response = await sendMessageAsync<AppState>({ type: "GET_INITIAL_STATE" });
-      set({ ...response, isLoading: false, error: null });
+  const state = await sendMessageAsync<AppState>({ type: "GET_INITIAL_STATE", source: "popup-ui" } as unknown as Message);
+      if (!state) {
+        set({ isLoading: false });
+        return;
+      }
+      const next = state as AppState;
+      set({ ...(next as any), isLoading: false, error: null });
     } catch (e) {
-      console.error("[v0][Store] loadState failed:", e);
-      set({ error: "Falha ao carregar o estado inicial.", isLoading: false });
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] loadState failed:", msg);
+      set({ isLoading: false, error: "Falha ao carregar estado: " + msg });
     }
   },
 
+  // Assina STATE_UPDATED uma única vez; retorna unsubscribe por componente
   listenForUpdates: () => {
-    // Se não estiver no ambiente da extensão (tests/dev), retorna um noop
-    if (typeof chrome === "undefined" || !chrome.runtime?.onMessage?.addListener) {
-      return () => void 0;
-    }
+    const listenerState = getListenerState(useStore);
+    
+    // já registrado?
+    if (!listenerState.listener) {
+      const handler = (msg: Message, _sender: chrome.runtime.MessageSender) => {
+        if (!msg || typeof msg !== "object") return;
 
-    const globalAny = globalThis as any;
-    // ensure we have a registration counter and handler slot
-    if (!globalAny.__v0_store_listener_count) globalAny.__v0_store_listener_count = 0;
-
-    // If a handler exists but (for some reason) isn't currently registered with
-    // chrome.runtime.onMessage, re-register it. Otherwise create+register a
-    // fresh handler. This guards against a stale global flag where the
-    // reference exists but was removed elsewhere.
-    if (globalAny.__v0_store_listener) {
-      try {
-        const hasFn = typeof chrome.runtime.onMessage.hasListener === "function";
-        const isRegistered = hasFn ? chrome.runtime.onMessage.hasListener(globalAny.__v0_store_listener) : true;
-        if (!isRegistered) {
-          chrome.runtime.onMessage.addListener(globalAny.__v0_store_listener);
+        // Dedupe por id
+        if (msg.id && listenerState.processedIds.has(msg.id)) return;
+        if (msg.id) {
+          listenerState.processedIds.add(msg.id);
+          // limpeza tardia evita leak: 5 min
+          setTimeout(() => listenerState.processedIds.delete(msg.id), 300000);
         }
-      } catch (e) {
-        // defensive: if hasListener/addListener misbehaves, fall back to
-        // creating a new handler below by clearing the slot.
-        globalAny.__v0_store_listener = undefined;
-      }
-    }
 
-    if (!globalAny.__v0_store_listener) {
-      // Flag para evitar re-emissão de mensagens durante processamento de STATE_UPDATED
-      let isHandlingUpdate = false;
+        if (msg.type === "STATE_UPDATED" && msg.payload) {
+          const incoming: AppState = (msg.payload && (msg.payload as any).state) ? (msg.payload as any).state : (msg.payload as any);
 
-      const handler = (msg: Message) => {
-        if (msg?.type === "STATE_UPDATED" && msg.payload) {
-          // Se já estiver processando um update, ignora para evitar loops
-          if (isHandlingUpdate) {
-            console.debug('[v0][Store] Ignoring nested STATE_UPDATED while already handling update');
-            return;
-          }
+          // Comparação simétrica (subset comparável) + hash
+          const curr = pickComparable(get());
+          const next = pickComparable(incoming);
+          const equal = deepEqual(curr, next);
+          if (equal) return;
 
-          const incoming = msg.payload as AppState;
-          // Dedupe: only set if payload differs from current store
-          try {
-            isHandlingUpdate = true;
-            set((curr) => {
-              if (
-                deepEqual(
-                  {
-                    blacklist: curr.blacklist,
-                    timeLimits: curr.timeLimits,
-                    dailyUsage: curr.dailyUsage,
-                    pomodoro: curr.pomodoro,
-                    siteCustomizations: curr.siteCustomizations,
-                    settings: curr.settings,
-                  },
-                  incoming
-                )
-              ) {
-                return curr as any; // real no-op, avoid triggering rerender
-              }
-              return { ...(incoming as AppState), isLoading: false, error: null } as any;
-            });
-          } finally {
-            isHandlingUpdate = false;
-          }
+          // Se o conteúdo não mudou, não atualize (evita eco)
+          const hash = stableStringify(next);
+          if (hash === listenerState.lastStateHash) return;
+
+          listenerState.lastStateHash = hash;
+          set({ ...(incoming as any), isLoading: false, error: null });
         }
       };
 
       try {
-        chrome.runtime.onMessage.addListener(handler);
-        globalAny.__v0_store_listener = handler;
+        chromeAPI.runtime.onMessage.addListener?.(handler);
+        listenerState.listener = handler;
       } catch (e) {
-        // If registration fails for any reason, ensure we don't keep a broken ref
-        globalAny.__v0_store_listener = undefined;
-        throw e;
+        console.error("[store] failed to register onMessage listener", e);
+        listenerState.listener = undefined;
       }
     }
 
-    // increment subscriber count and return an unsubscribe that decrements it
-    globalAny.__v0_store_listener_count++;
-    let unsubscribed = false;
+    listenerState.listenerCount++;
+    let done = false;
     return () => {
-      if (unsubscribed) return;
-      unsubscribed = true;
-      try {
-        // decrement but never below zero
-        globalAny.__v0_store_listener_count = Math.max(0, (globalAny.__v0_store_listener_count || 1) - 1);
-        if (globalAny.__v0_store_listener_count === 0) {
-          // try removeListener defensively and always clear global slots so
-          // future mounts can re-register cleanly
-          try {
-            if (globalAny.__v0_store_listener && typeof chrome.runtime.onMessage.removeListener === "function") {
-              chrome.runtime.onMessage.removeListener(globalAny.__v0_store_listener);
-            }
-          } catch {}
-          globalAny.__v0_store_listener = undefined;
-          globalAny.__v0_store_listener_count = 0;
-        }
-      } catch (e) {
-        // defensive noop
+      if (done) return;
+      done = true;
+      // Fix decrementing from 0 issue
+      const currentCount = listenerState.listenerCount ?? 0;
+      if (currentCount === 0) {
+        console.warn("[store] Attempted to decrement listener count below 0 - possible ref-count bug");
+      } else {
+        listenerState.listenerCount = Math.max(0, currentCount - 1);
+      }
+      if (listenerState.listenerCount === 0 && listenerState.listener) {
+        try {
+          chromeAPI.runtime.onMessage.removeListener?.(listenerState.listener);
+        } catch {}
+        listenerState.listener = undefined;
+        listenerState.lastStateHash = "";
+        listenerState.processedIds.clear?.();
       }
     };
   },
 
-  // Ações que conversam com o Service Worker
-  addToBlacklist: async (domain: string) => {
-    try {
-      set({ error: null });
-      await sendMessageAsync({ type: "ADD_TO_BLACKLIST", payload: { domain } });
-      // Atualização de estado virá via STATE_UPDATED
+  // ── Ações (sempre via SW; UI não escreve storage) ─────────────
+
+  addToBlacklist: async (domain) => {
+    set({ error: null });
+      try {
+  await sendMessageAsync({ type: "ADD_TO_BLACKLIST", payload: { domain }, source: "popup-ui" } as unknown as Message);
+      // estado final virá por STATE_UPDATED
     } catch (e) {
-      const error = String(e);
-      console.error("[v0][Store] addToBlacklist failed:", error);
-      set({ error: "Falha ao adicionar à blacklist: " + error });
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] addToBlacklist failed:", msg);
+      set({ error: "Falha ao adicionar à blacklist: " + msg });
       throw e;
     }
   },
 
-  removeFromBlacklist: async (domain: string) => {
-    try {
-      set({ error: null });
-      await sendMessageAsync({ type: "REMOVE_FROM_BLACKLIST", payload: { domain } });
-      // Atualização de estado virá via STATE_UPDATED
+  removeFromBlacklist: async (domain) => {
+    set({ error: null });
+  try {
+  await sendMessageAsync({ type: "REMOVE_FROM_BLACKLIST", payload: { domain }, source: "popup-ui" } as unknown as Message);
     } catch (e) {
-      const error = String(e);
-      console.error("[v0][Store] removeFromBlacklist failed:", error);
-      set({ error: "Falha ao remover da blacklist: " + error });
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] removeFromBlacklist failed:", msg);
+      set({ error: "Falha ao remover da blacklist: " + msg });
       throw e;
     }
   },
 
-  startPomodoro: async (focusMinutes: number, breakMinutes: number) => {
-    try {
-      set({ error: null });
-      await sendMessageAsync({
-        type: "START_POMODORO",
-        payload: { focusMinutes, breakMinutes },
-      });
-      // Atualização via STATE_UPDATED
+  setTimeLimit: async (domain, limitMinutes) => {
+    set({ error: null });
+  try {
+  await sendMessageAsync({ type: "TIME_LIMIT_SET", payload: { domain, dailyMinutes: limitMinutes }, source: "popup-ui" } as unknown as Message);
     } catch (e) {
-      const error = String(e);
-      console.error("[v0][Store] startPomodoro failed:", error);
-      set({ error: "Falha ao iniciar Pomodoro: " + error });
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] setTimeLimit failed:", msg);
+      set({ error: "Falha ao definir limite de tempo: " + msg });
+      throw e;
+    }
+  },
+
+  startPomodoro: async (focusMinutes, breakMinutes) => {
+    set({ error: null });
+      try {
+  await sendMessageAsync({ type: "POMODORO_START", payload: { config: { focusMinutes, shortBreakMinutes: breakMinutes } }, source: "popup-ui" } as unknown as Message);
+    } catch (e) {
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] startPomodoro failed:", msg);
+      set({ error: "Falha ao iniciar Pomodoro: " + msg });
       throw e;
     }
   },
 
   stopPomodoro: async () => {
-    try {
-      set({ error: null });
-      await sendMessageAsync({ type: "STOP_POMODORO" });
-      // Atualização via STATE_UPDATED
+    set({ error: null });
+  try {
+  await sendMessageAsync({ type: "POMODORO_STOP", source: "popup-ui" } as unknown as Message);
     } catch (e) {
-      const error = String(e);
-      console.error("[v0][Store] stopPomodoro failed:", error);
-      set({ error: "Falha ao parar Pomodoro: " + error });
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] stopPomodoro failed:", msg);
+      set({ error: "Falha ao parar Pomodoro: " + msg });
       throw e;
     }
   },
 
-  toggleZenMode: async (preset?: string) => {
-    try {
-      set({ error: null });
-      await sendMessageAsync({ type: "TOGGLE_ZEN_MODE", payload: { preset } });
-      // Não há STATE_UPDATED aqui; ação ocorre no content script
+  toggleZenMode: async (preset) => {
+    set({ error: null });
+  try {
+  await sendMessageAsync({ type: "TOGGLE_ZEN_MODE", payload: { preset }, source: "popup-ui" } as unknown as Message);
+      // ação pode atuar em content scripts; SW deve emitir STATE_UPDATED se necessário
     } catch (e) {
-      const error = String(e);
-      console.error("[v0][Store] toggleZenMode failed:", error);
-      set({ error: "Falha ao alternar Modo Zen: " + error });
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] toggleZenMode failed:", msg);
+      set({ error: "Falha ao alternar Modo Zen: " + msg });
       throw e;
     }
   },
 
-  setTimeLimit: async (domain: string, limitMinutes: number) => {
-    try {
-      set({ error: null });
-      await sendMessageAsync({
-        type: "SET_TIME_LIMIT",
-        payload: { domain, limitMinutes }, // ⚠️ chave correta esperada pelo SW
-      });
-      // Atualização virá via STATE_UPDATED
+  updateSettings: async (partial) => {
+    set({ error: null });
+  try {
+  await sendMessageAsync({ type: "STATE_PATCH", payload: { patch: { settings: partial } }, source: "popup-ui" } as unknown as Message);
     } catch (e) {
-      const error = String(e);
-      console.error("[v0][Store] setTimeLimit failed:", error);
-      set({ error: "Falha ao definir limite de tempo: " + error });
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] updateSettings failed:", msg);
+      set({ error: "Falha ao atualizar configurações: " + msg });
       throw e;
     }
   },
 }));
+
+// Per-store instance message listener state keyed by the exported useStore hook type
+const storeListenerStates = new WeakMap<ReturnType<typeof useStore> & object, MessageListenerState>();
+
+function getListenerState(storeInstance: ReturnType<typeof useStore> & object): MessageListenerState {
+  let state = storeListenerStates.get(storeInstance);
+  if (!state) {
+    state = createListenerState();
+    storeListenerStates.set(storeInstance, state);
+  }
+  return state;
+}

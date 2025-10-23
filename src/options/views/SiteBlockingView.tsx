@@ -1,10 +1,22 @@
+// src/options/SiteBlockingView.tsx
+"use client";
+
 import { useEffect, useRef, useState } from "react";
 import { Youtube, Plus, Trash2 } from "lucide-react";
+
 import { chromeAPI } from "../../shared/chrome-mock";
 import { deepEqual } from "../../shared/utils";
 import { normalizeDomain } from "../../shared/url";
-import type { BlacklistEntry } from "../../shared/types";
+import type { 
+  BlacklistEntry, 
+  Message,
+  MessageId
+} from "../../shared/types";
 
+/**
+ * Customizações específicas para YouTube na UI do painel.
+ * Mantemos localmente e enviamos ao SW para persistência.
+ */
 interface YouTubeCustomization {
   hideHomepage: boolean;
   hideShorts: boolean;
@@ -20,7 +32,7 @@ const DEFAULT_YT: YouTubeCustomization = {
   hideRecommendations: false,
 };
 
-// Converte qualquer formato vindo do storage para string[]
+/** Converte valores vindos do storage para array de domínios */
 function toDomains(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
@@ -35,35 +47,40 @@ function toDomains(raw: unknown): string[] {
 }
 
 export default function SiteBlockingView(): JSX.Element {
-  const [customizations, setCustomizations] = useState<SiteCustomizations>({});
+  // --- estado local (somente leitura de storage; escrita via SW) ---
   const [blockedSites, setBlockedSites] = useState<string[]>([]);
+  const [customizations, setCustomizations] = useState<SiteCustomizations>({});
   const [newSite, setNewSite] = useState("");
 
-  // flags/refs por-instância (não globais)
-  const ignoreNextChange = useRef(false);
+  // --- refs para comparações estáveis e guards de concorrência ---
   const blockedRef = useRef<string[]>([]);
   const customRef = useRef<SiteCustomizations>({});
+  const sendingRef = useRef(false); // trava rápida para evitar rajadas de envios
 
-  useEffect(() => { blockedRef.current = blockedSites; }, [blockedSites]);
-  useEffect(() => { customRef.current = customizations; }, [customizations]);
+  useEffect(() => {
+    blockedRef.current = blockedSites;
+  }, [blockedSites]);
+  useEffect(() => {
+    customRef.current = customizations;
+  }, [customizations]);
 
-  // Carrega estado inicial
-  useEffect(() => { void loadData(); }, []);
-  async function loadData() {
-    try {
-      const { siteCustomizations } =
-        (await chromeAPI?.storage?.local?.get("siteCustomizations")) ?? {};
-      const { blacklist } =
-        (await chromeAPI?.storage?.local?.get("blacklist")) ?? {};
+  // --- carga inicial direto do storage ---
+  useEffect(() => {
+    (async () => {
+      try {
+        const { blacklist } =
+          (await chromeAPI?.storage?.local?.get("blacklist")) ?? {};
+        const { siteCustomizations } =
+          (await chromeAPI?.storage?.local?.get("siteCustomizations")) ?? {};
+        setBlockedSites(toDomains(blacklist));
+        setCustomizations((siteCustomizations as SiteCustomizations) ?? {});
+      } catch (e) {
+        console.warn("[SiteBlockingView] initial load failed", e);
+      }
+    })();
+  }, []);
 
-      setCustomizations(siteCustomizations ?? {});
-      setBlockedSites(toDomains(blacklist));
-    } catch (e) {
-      console.warn("[v0] SiteBlockingView loadData failed", e);
-    }
-  }
-
-  // Escuta mudanças externas do storage.local (eco controlado só para customizations)
+  // --- ouvir storage.onChanged (UI não grava, então não há eco) ---
   useEffect(() => {
     if (!chromeAPI?.storage?.onChanged?.addListener) return;
 
@@ -73,20 +90,14 @@ export default function SiteBlockingView(): JSX.Element {
     ) => {
       if (area !== "local") return;
 
-      // Blacklist: nunca gravamos localmente aqui, então só converge
       if (changes.blacklist) {
         const next = toDomains(changes.blacklist.newValue);
         if (!deepEqual(next, blockedRef.current)) setBlockedSites(next);
       }
-
-      // Customizações: podemos ter acabado de gravar localmente → consumir eco 1x
       if (changes.siteCustomizations) {
-        if (ignoreNextChange.current) {
-          ignoreNextChange.current = false;
-        } else {
-          const nextC = (changes.siteCustomizations.newValue as SiteCustomizations) ?? {};
-          if (!deepEqual(nextC, customRef.current)) setCustomizations(nextC);
-        }
+        const next = (changes.siteCustomizations.newValue ??
+          {}) as SiteCustomizations;
+        if (!deepEqual(next, customRef.current)) setCustomizations(next);
       }
     };
 
@@ -94,86 +105,164 @@ export default function SiteBlockingView(): JSX.Element {
     return () => chromeAPI.storage.onChanged.removeListener(handler);
   }, []);
 
-  // ===== AÇÕES =====
+  // --- ações: sempre mandar mensagem ao SW; nada de storage.set na UI ---
 
-  // Customizações YT: grava local só aqui (nada de useEffect que regrava/enviar msg)
-  const updateYouTubeSetting = async (key: keyof YouTubeCustomization, value: boolean) => {
-    const yt = { ...DEFAULT_YT, ...(customRef.current["youtube.com"] ?? {}) };
-    const updatedYT: YouTubeCustomization = { ...yt, [key]: value };
-    const updated: SiteCustomizations = { ...customRef.current, "youtube.com": updatedYT };
-    if (deepEqual(updated, customRef.current)) return;
+  async function sendMessage<T = any>(msg: Message): Promise<T | void> {
+    // Usar promise/lastError de acordo com MV3; SW deve dar return true p/ async. :contentReference[oaicite:2]{index=2}
+    return new Promise((resolve, reject) => {
+      try {
+        chromeAPI.runtime.sendMessage(msg as any, (response: T) => {
+          const err = (chromeAPI.runtime as any).lastError;
+          if (err) return reject(new Error(err.message));
+          resolve(response);
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
 
-    try {
-      ignoreNextChange.current = true; // consumir o onChanged desta escrita
-      await chromeAPI.storage.local.set({ siteCustomizations: updated });
-    } catch { /* noop */ }
-    setCustomizations(updated);
-
-    // (Opcional) avisar o SW se ele usar customizations para algo
-    try {
-      await chromeAPI.runtime.sendMessage?.({ type: "UPDATE_CUSTOMIZATIONS", payload: updated });
-    } catch { /* noop */ }
-  };
-
-  // Blacklist: NUNCA grava localmente aqui; somente avisa o SW e atualiza otimistamente
-  const addBlockedSite = async () => {
-    const normalized = normalizeDomain(newSite);
+  async function addBlockedSite() {
+    const normalized = normalizeDomain(newSite.trim());
     if (!normalized) return;
 
+    // otimista (UI) + evita duplicar
     const next = Array.from(new Set([...blockedRef.current, normalized]));
     if (!deepEqual(next, blockedRef.current)) setBlockedSites(next);
     setNewSite("");
 
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     try {
-      await chromeAPI.runtime.sendMessage({
+      await sendMessage({
         type: "ADD_TO_BLACKLIST",
-        payload: { domain: normalized }
+        payload: { domain: normalized },
+        source: "panel-ui",
+        id: crypto.randomUUID() as MessageId,
+        ts: Date.now(),
       });
-    } catch {
-      // se falhar, re-sincroniza com a fonte de verdade
-      void loadData();
+      // atualização real virá via storage.onChanged
+    } catch (e) {
+      console.error("[SiteBlockingView] addBlockedSite failed", e);
+      // fallback: recarrega estado do storage para garantir consistência
+      try {
+        const { blacklist } =
+          (await chromeAPI?.storage?.local?.get("blacklist")) ?? {};
+        setBlockedSites(toDomains(blacklist));
+      } catch {}
+    } finally {
+      sendingRef.current = false;
     }
-  };
+  }
 
-  const removeBlockedSite = async (domain: string) => {
+  async function removeBlockedSite(domain: string) {
     const next = blockedRef.current.filter((d) => d !== domain);
     if (!deepEqual(next, blockedRef.current)) setBlockedSites(next);
 
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     try {
-      await chromeAPI.runtime.sendMessage({
+      await sendMessage({
         type: "REMOVE_FROM_BLACKLIST",
-        payload: { domain }
+        payload: { domain },
+        source: "panel-ui",
+        id: crypto.randomUUID() as MessageId,
+        ts: Date.now(),
       });
-    } catch {
-      void loadData();
+    } catch (e) {
+      console.error("[SiteBlockingView] removeBlockedSite failed", e);
+      try {
+        const { blacklist } =
+          (await chromeAPI?.storage?.local?.get("blacklist")) ?? {};
+        setBlockedSites(toDomains(blacklist));
+      } catch {}
+    } finally {
+      sendingRef.current = false;
     }
-  };
+  }
 
+  async function updateYouTubeSetting(
+    key: keyof YouTubeCustomization,
+    value: boolean
+  ) {
+    const current = customRef.current["youtube.com"] ?? DEFAULT_YT;
+    const updatedYT: YouTubeCustomization = { ...current, [key]: value };
+    const updated: SiteCustomizations = {
+      ...customRef.current,
+      "youtube.com": updatedYT,
+    };
+
+    if (deepEqual(updated, customRef.current)) return;
+
+    // otimista (UI)
+    setCustomizations(updated);
+
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      await sendMessage({
+        type: "SITE_CUSTOMIZATION_UPDATED",
+        payload: { domain: "youtube.com", config: updatedYT },
+        source: "panel-ui",
+        id: crypto.randomUUID() as MessageId,
+        ts: Date.now(),
+      });
+    } catch (e) {
+      console.error("[SiteBlockingView] updateYouTubeSetting failed", e);
+      // rollback simples consultando o storage
+      try {
+        const { siteCustomizations } =
+          (await chromeAPI?.storage?.local?.get("siteCustomizations")) ?? {};
+        setCustomizations((siteCustomizations as SiteCustomizations) ?? {});
+      } catch {}
+    } finally {
+      sendingRef.current = false;
+    }
+  }
+
+  // --- dados derivados para render ---
   const ytSettings: YouTubeCustomization = {
     ...DEFAULT_YT,
     ...(customizations["youtube.com"] ?? {}),
   };
 
-  const toggleOptions: Array<{ key: keyof YouTubeCustomization; label: string; icon: string }> = [
+  const toggleOptions: Array<{
+    key: keyof YouTubeCustomization;
+    label: string;
+    icon: string;
+  }> = [
     { key: "hideHomepage", label: "Ocultar Página Inicial", icon: "🏠" },
     { key: "hideShorts", label: "Ocultar Shorts", icon: "📱" },
     { key: "hideComments", label: "Ocultar Comentários", icon: "💬" },
-    { key: "hideRecommendations", label: "Ocultar Vídeos Recomendados", icon: "📺" },
+    { key: "hideRecommendations", label: "Ocultar Recomendados", icon: "📺" },
   ];
 
-  // ===== UI =====
+  // --- UI ---
   return (
     <div className="space-y-6">
       <div className="glass-card p-6">
-        <h2 className="text-3xl font-bold text-white mb-2">Bloqueio de Sites e Elementos</h2>
+        <h2 className="text-3xl font-bold text-white mb-2">
+          Bloqueio de Sites e Elementos
+        </h2>
         <p className="text-gray-400">Controle total sobre distrações online</p>
       </div>
 
+      {/* Blacklist */}
       <div className="glass-card p-6">
         <h3 className="text-lg font-semibold text-white mb-4">Sites Bloqueados</h3>
+
         <div className="space-y-2 mb-4">
+          {blockedSites.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <p>Nenhum site bloqueado ainda</p>
+            </div>
+          )}
+
           {blockedSites.map((site) => (
-            <div key={site} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/10">
+            <div
+              key={site}
+              className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/10"
+            >
               <span className="text-white font-mono text-sm">{site}</span>
               <button
                 onClick={() => removeBlockedSite(site)}
@@ -184,11 +273,6 @@ export default function SiteBlockingView(): JSX.Element {
               </button>
             </div>
           ))}
-          {blockedSites.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <p>Nenhum site bloqueado ainda</p>
-            </div>
-          )}
         </div>
 
         <div className="flex gap-2">
@@ -210,31 +294,44 @@ export default function SiteBlockingView(): JSX.Element {
         </div>
       </div>
 
+      {/* Customização YouTube */}
       <div className="glass-card p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="p-3 bg-red-500/20 rounded-lg"><Youtube className="w-6 h-6 text-red-400" /></div>
+          <div className="p-3 bg-red-500/20 rounded-lg">
+            <Youtube className="w-6 h-6 text-red-400" />
+          </div>
           <div className="flex-1">
-            <h3 className="text-xl font-semibold text-white">Personalização de Sites</h3>
+            <h3 className="text-xl font-semibold text-white">
+              Personalização de Sites
+            </h3>
             <p className="text-sm text-gray-400">YouTube</p>
           </div>
         </div>
 
         <div className="space-y-3">
           {toggleOptions.map((option) => (
-            <div key={option.key} className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10 hover:border-white/20 transition-colors">
+            <div
+              key={option.key}
+              className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10 hover:border-white/20 transition-colors"
+            >
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{option.icon}</span>
                 <span className="text-white font-medium">{option.label}</span>
               </div>
+
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
                   checked={!!ytSettings[option.key]}
-                  onChange={(e) => updateYouTubeSetting(option.key, e.target.checked)}
+                  onChange={(e) =>
+                    updateYouTubeSetting(option.key, e.target.checked)
+                  }
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-                <span className="ml-3 text-sm text-gray-400">{ytSettings[option.key] ? "On" : "Off"}</span>
+                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:bg-blue-600 transition-colors" />
+                <span className="ml-3 text-sm text-gray-300">
+                  {ytSettings[option.key] ? "Ativado" : "Desativado"}
+                </span>
               </label>
             </div>
           ))}

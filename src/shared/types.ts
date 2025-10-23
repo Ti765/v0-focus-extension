@@ -1,110 +1,308 @@
-// Message types for inter-component communication
-export type MessageType =
-  | "GET_INITIAL_STATE"
-  | "STATE_UPDATED"
-  | "ADD_TO_BLACKLIST"
-  | "REMOVE_FROM_BLACKLIST"
-  | "START_POMODORO"
-  | "STOP_POMODORO"
-  | "CONTENT_ANALYSIS_RESULT"
-  | "TOGGLE_ZEN_MODE"
-  | "SET_TIME_LIMIT"
-  | "UPDATE_SETTINGS"
-  | "SITE_CUSTOMIZATION_UPDATED";
+// src/shared/types.ts
 
-export interface Message<T = any> {
-  type: MessageType
-  payload?: T
-}
+/* =========================
+ * Utilitários básicos
+ * ========================= */
 
-// Pomodoro states
-export type PomodoroState = "IDLE" | "FOCUS" | "BREAK"
+/** Nominal/Branded type (rótulo no tipo, sem custo em runtime). */
+export type Brand<T, B extends string> = T & { readonly __brand: B };
 
-export interface PomodoroConfig {
-  focusMinutes: number
-  breakMinutes: number
-  longBreakMinutes: number
-  cyclesBeforeLongBreak: number
-  adaptiveMode: boolean;
-  notificationsEnabled?: boolean;
-}
+/** JSON "puro" (serializável) — útil p/ mensagens e storage. */
+export type JSONPrimitive = string | number | boolean | null;
+export type JSONValue = JSONPrimitive | JSONObject | JSONArray;
+export type JSONObject = { [k: string]: JSONValue };
+export type JSONArray = JSONValue[]; // ref.: definição canônica de JSONValue.
 
-export interface PomodoroStatus {
-  state: PomodoroState
-  timeRemaining: number
-  currentCycle: number
-  config: PomodoroConfig
-  startTime?: number // Adicionado para rastrear o início da contagem
-}
+/** Datas */
+export type RFC3339String = string; // e.g. "2025-10-23T13:45:00Z" (subset ISO 8601).
+export type ISODateString = string; // "YYYY-MM-DD" (data sem hora).
 
-// Blacklist and time tracking
+/** IDs e afins */
+export type MessageId = Brand<string, "MessageId">;
+export type UserId = Brand<string, "UserId">;
+export type Domain = Brand<string, "Domain">;
+
+/** Auxiliares */
+export type Nullable<T> = T | null;
+export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
+export type NonEmptyArray<T> = [T, ...T[]];
+
+/* =========================
+ * Domínio: Bloqueios / Limites / Uso
+ * ========================= */
+
 export interface BlacklistEntry {
-  domain: string
-  addedAt: number
+  domain: Domain;
+  addedAt: RFC3339String;
+  addedBy?: UserId;
 }
 
 export interface TimeLimitEntry {
-  domain: string
-  limitMinutes: number
-}
-
-export interface DomainUsage {
-  [domain: string]: number // time in seconds
+  domain: Domain;
+  /** minutos permitidos por dia para o domínio */
+  dailyMinutes: number;
+  /** reset diário/última rotação */
+  lastResetAt?: RFC3339String;
 }
 
 export interface DailyUsage {
-  [date: string]: DomainUsage
+  /** data "YYYY-MM-DD" */
+  date: ISODateString;
+  totalMinutes: number;
+  perDomain: Record<string, number>; // domain -> minutos
 }
 
-// Content analysis
+/* =========================
+ * Domínio: Pomodoro
+ * ========================= */
+
+export type PomodoroPhase = "idle" | "focus" | "short_break" | "long_break";
+
+export interface PomodoroConfig {
+  focusMinutes: number;         // ex.: 25
+  shortBreakMinutes: number;    // ex.: 5
+  longBreakMinutes: number;     // ex.: 15
+  cyclesBeforeLongBreak: number; // ex.: 4
+  autoStartBreaks: boolean;
+}
+
+export interface PomodoroState {
+  phase: PomodoroPhase;
+  isPaused: boolean;
+  /** ciclo atual (0-based) dentro do conjunto até o long break */
+  cycleIndex: number;
+  /** datas/timestamps em RFC3339 — fáceis de trafegar em mensagens */
+  startedAt?: RFC3339String;
+  endsAt?: RFC3339String;
+  remainingMs?: number;
+}
+
+/* =========================
+ * Domínio: Análise/Customização de conteúdo
+ * ========================= */
+
 export interface ContentAnalysisResult {
-  url: string
-  classification: "productive" | "distracting" | "neutral"
-  score: number
-  timestamp: number
+  score: number; // 0..1
+  categories: Record<string, number>;
+  flagged: boolean;
+  details?: string;
 }
 
-// Site Customization (Zen Mode)
-export interface SiteCustomization {
-    [domain: string]: {
-        selectorsToRemove: string[];
-    };
+/** Customizações específicas por domínio (ex.: YouTube). */
+export interface YouTubeCustomization {
+  hideHomepage: boolean;
+  hideShorts: boolean;
+  hideComments: boolean;
+  hideRecommendations: boolean;
 }
+export type SiteCustomization = YouTubeCustomization; // extensível no futuro se precisar
+export type SiteCustomizationMap = Record<string, SiteCustomization>;
 
-
-// App state
-export interface AppState {
-  blacklist: BlacklistEntry[]
-  timeLimits: TimeLimitEntry[]
-  dailyUsage: DailyUsage
-  pomodoro: PomodoroStatus
-  siteCustomizations: SiteCustomization
-  settings: UserSettings
-}
+/* =========================
+ * Configurações do usuário
+ * ========================= */
 
 export interface UserSettings {
-  analyticsConsent: boolean
-  productiveKeywords: string[]
-  distractingKeywords: string[]
-  notificationsEnabled: boolean
+  theme: "system" | "light" | "dark";
+  language?: string;              // "pt-BR", "en-US", ...
+  blockMode: "soft" | "strict";
+  notifications: boolean;
+  syncWithCloud: boolean;
+  timezone?: string;              // IANA TZ, ex.: "America/Sao_Paulo"
+  telemetry?: boolean;            // métricas/telemetria
 }
 
-// Firebase data model
+/* =========================
+ * Estado global da aplicação
+ * ========================= */
+
+export interface AppState {
+  isLoading: boolean;
+  error: Nullable<string>;
+
+  /** Simples e performático p/ UI; detalhes ficam em TimeLimitEntry[] etc. */
+  blacklist: string[];                 // lista de domínios (normalizados)
+  timeLimits: TimeLimitEntry[];
+  dailyUsage: Record<string, DailyUsage>; // chave = ISODateString
+
+  siteCustomizations: SiteCustomizationMap;
+
+  pomodoro: {
+    config: PomodoroConfig;
+    state: PomodoroState;
+  };
+
+  settings: UserSettings;
+}
+
+/* =========================
+ * Mensageria (MV3) — UI <-> SW
+ * =========================
+ * Unions discriminadas + payloads tipados.
+ * Segue o guia oficial: mensagens JSON-serializáveis; para respostas
+ * assíncronas, o listener do SW deve `return true`/Promise.
+ */
+
+export type ContextSource =
+  | "service-worker"
+  | "panel-ui"     // página de opções
+  | "popup-ui"
+  | "content-script";
+
+export const MESSAGE = {
+  // Estado
+  GET_INITIAL_STATE: "GET_INITIAL_STATE",
+  STATE_GET: "STATE_GET",
+  STATE_UPDATED: "STATE_UPDATED",
+  STATE_PATCH: "STATE_PATCH",
+
+  // Blacklist
+  ADD_TO_BLACKLIST: "ADD_TO_BLACKLIST",
+  REMOVE_FROM_BLACKLIST: "REMOVE_FROM_BLACKLIST",
+
+  // Limites de tempo
+  TIME_LIMIT_SET: "TIME_LIMIT_SET",
+  TIME_LIMIT_REMOVE: "TIME_LIMIT_REMOVE",
+
+  // Customização de sites
+  SITE_CUSTOMIZATION_UPDATED: "SITE_CUSTOMIZATION_UPDATED",
+
+  // Pomodoro
+  POMODORO_START: "POMODORO_START",
+  POMODORO_PAUSE: "POMODORO_PAUSE",
+  POMODORO_RESUME: "POMODORO_RESUME",
+  POMODORO_STOP: "POMODORO_STOP",
+
+  // Sinalização/diagnóstico
+  PING: "PING",
+  PONG: "PONG",
+  ERROR: "ERROR",
+} as const;
+
+export type MessageType = typeof MESSAGE[keyof typeof MESSAGE];
+
+export interface BaseMessage<T extends MessageType = MessageType, P = unknown> {
+  type: T;
+  id: MessageId;
+  source: ContextSource;
+  ts: number; // epoch ms
+  payload?: P;
+}
+
+/* ===== Payloads ===== */
+
+// Estado
+export interface StateUpdatedPayload { state: AppState; }
+export interface StatePatchPayload { patch: DeepPartial<AppState>; }
+
+// Blacklist
+export interface AddToBlacklistPayload { domain: string; }
+export interface RemoveFromBlacklistPayload { domain: string; }
+
+// Limites
+export interface TimeLimitSetPayload extends TimeLimitEntry {}
+export interface TimeLimitRemovePayload { domain: string; }
+
+// Customização
+export interface SiteCustomizationUpdatedPayload {
+  domain: string; // ex.: "youtube.com"
+  config: YouTubeCustomization;
+}
+
+// Pomodoro
+export interface PomodoroStartPayload {
+  /** sobrescrever config atual (opcional) */
+  config?: Partial<PomodoroConfig>;
+  /** opcional: duração custom de foco em minutos */
+  focusMinutesOverride?: number;
+}
+export type PomodoroSimplePayload = Record<string, never>;
+
+// Erros/ping
+export interface ErrorPayload { code: string; message: string; details?: JSONValue; }
+export type PingPayload = { echo?: JSONValue };
+export type PongPayload = { echo?: JSONValue };
+
+/* ===== Mensagens (unions discriminadas) ===== */
+
+export type Message =
+  | BaseMessage<typeof MESSAGE.GET_INITIAL_STATE>
+  | BaseMessage<typeof MESSAGE.STATE_GET>
+  | BaseMessage<typeof MESSAGE.STATE_UPDATED, StateUpdatedPayload>
+  | BaseMessage<typeof MESSAGE.STATE_PATCH, StatePatchPayload>
+  | BaseMessage<typeof MESSAGE.ADD_TO_BLACKLIST, AddToBlacklistPayload>
+  | BaseMessage<typeof MESSAGE.REMOVE_FROM_BLACKLIST, RemoveFromBlacklistPayload>
+  | BaseMessage<typeof MESSAGE.TIME_LIMIT_SET, TimeLimitSetPayload>
+  | BaseMessage<typeof MESSAGE.TIME_LIMIT_REMOVE, TimeLimitRemovePayload>
+  | BaseMessage<typeof MESSAGE.SITE_CUSTOMIZATION_UPDATED, SiteCustomizationUpdatedPayload>
+  | BaseMessage<typeof MESSAGE.POMODORO_START, PomodoroStartPayload>
+  | BaseMessage<typeof MESSAGE.POMODORO_PAUSE, PomodoroSimplePayload>
+  | BaseMessage<typeof MESSAGE.POMODORO_RESUME, PomodoroSimplePayload>
+  | BaseMessage<typeof MESSAGE.POMODORO_STOP, PomodoroSimplePayload>
+  | BaseMessage<typeof MESSAGE.PING, PingPayload>
+  | BaseMessage<typeof MESSAGE.PONG, PongPayload>
+  | BaseMessage<typeof MESSAGE.ERROR, ErrorPayload>;
+
+/** Respostas opcionais do SW (shape genérico) */
+export type MessageResponse<T = unknown> =
+  | { ok: true; data?: T }
+  | { ok: false; error: ErrorPayload };
+
+/* =========================
+ * Storage (chaves canônicas)
+ * ========================= */
+
+export type StorageKey =
+  | "blacklist"
+  | "timeLimits"
+  | "dailyUsage"
+  | "siteCustomizations"
+  | "pomodoro"
+  | "settings";
+
+export type StorageSnapshot = Partial<{
+  blacklist: string[];
+  timeLimits: TimeLimitEntry[];
+  dailyUsage: Record<string, DailyUsage>;
+  siteCustomizations: SiteCustomizationMap;
+  pomodoro: { config: PomodoroConfig; state: PomodoroState };
+  settings: UserSettings;
+}>;
+
+/* =========================
+ * Firebase (modelos de dados)
+ * ========================= */
+
 export interface FirebaseUserProfile {
-  createdAt: number
-  consentGivenAt: number
-  appVersion: string
-  userProperties?: {
-    ageRange?: string
-    goals?: string
-  }
+  uid: UserId;
+  email: string;
+  displayName?: string;
+  photoURL?: string;
+  createdAt: RFC3339String;
+  lastLoginAt?: RFC3339String;
+  pro?: boolean;
 }
 
 export interface FirebaseDailySummary {
-  totalFocusTime: number
-  pomodorosCompleted: number
-  topDistractingSites: Array<{
-    domain: string
-    time: number
-  }>
+  uid: UserId;
+  date: ISODateString;
+  totalMinutes: number;
+  perDomain: Record<string, number>;
+}
+
+/* =========================
+ * Type Guards helpers
+ * ========================= */
+
+export function isMessageOfType<T extends MessageType>(
+  msg: Message,
+  type: T
+): msg is Extract<Message, { type: T }> {
+  return msg?.type === type;
+}
+
+export function isJsonValue(_: unknown): _ is JSONValue {
+  // guard "amplo": apenas garante que não é função/undefined
+  // (JSON real será validado em runtime conforme necessidade)
+  return _ !== undefined && typeof _ !== "function";
 }
