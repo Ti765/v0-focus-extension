@@ -7,26 +7,27 @@ import { Play, Square, Clock } from "lucide-react";
 export default function PomodoroTimer() {
   const { pomodoro, startPomodoro, stopPomodoro } = useStore();
   const [focusMinutes, setFocusMinutes] = useState(pomodoro.config.focusMinutes || 25);
-  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.breakMinutes || 5);
-  const [displayTime, setDisplayTime] = useState(pomodoro.timeRemaining);
+  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.shortBreakMinutes || 5);
+  const [displayTime, setDisplayTime] = useState(Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000));
 
   useEffect(() => {
     // Se estiver inativo, mostre o tempo de foco configurado
-    if (pomodoro.state === 'IDLE') {
+    if (pomodoro.state.phase === 'idle') {
       setDisplayTime(focusMinutes * 60);
       return;
     }
     
-    // Se não houver startTime, não podemos calcular o tempo restante na UI
-    if (!pomodoro.startTime) {
-        setDisplayTime(pomodoro.timeRemaining);
+  // Se não houver startedAt, não podemos calcular o tempo restante na UI
+  if (!pomodoro.state.startedAt) {
+    setDisplayTime(Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000));
         return;
     }
 
     // A lógica do timer agora é gerenciada na UI para uma contagem regressiva suave
     const interval = setInterval(() => {
-      const elapsedSeconds = (Date.now() - pomodoro.startTime!) / 1000;
-      const remaining = Math.max(0, pomodoro.timeRemaining - elapsedSeconds);
+  const startedAt = new Date(pomodoro.state.startedAt!).getTime();
+  const elapsedSeconds = (Date.now() - startedAt) / 1000;
+  const remaining = Math.max(0, Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000) - elapsedSeconds);
       setDisplayTime(remaining);
 
       if (remaining <= 0) {
@@ -35,7 +36,7 @@ export default function PomodoroTimer() {
     }, 250); // Atualiza 4x por segundo para ser mais preciso
 
     return () => clearInterval(interval);
-  }, [pomodoro.state, pomodoro.startTime, pomodoro.timeRemaining, focusMinutes]);
+  }, [pomodoro.state.phase, pomodoro.state.startedAt, pomodoro.state.remainingMs, focusMinutes]);
 
   const handleStart = () => {
     startPomodoro(focusMinutes, breakMinutes);
@@ -51,24 +52,24 @@ export default function PomodoroTimer() {
     <div className="space-y-4">
       <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
         <div className="text-sm font-medium text-gray-400 mb-2">
-          {pomodoro.state === "IDLE" && "Pronto para começar"}
-          {pomodoro.state === "FOCUS" && "🎯 Modo Foco"}
-          {pomodoro.state === "BREAK" && "☕ Pausa"}
+          {pomodoro.state.phase === "idle" && "Pronto para começar"}
+          {pomodoro.state.phase === "focus" && "🎯 Modo Foco"}
+          {(pomodoro.state.phase === "short_break" || pomodoro.state.phase === "long_break") && "☕ Pausa"}
         </div>
 
-        <div className={`text-4xl font-bold mb-4 ${pomodoro.state !== 'IDLE' ? 'text-blue-400' : 'text-gray-600'}`}>
+        <div className={`text-4xl font-bold mb-4 ${pomodoro.state.phase !== 'idle' ? 'text-blue-400' : 'text-gray-600'}`}>
             {formatTime(displayTime)}
         </div>
 
         <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
           <Clock className="w-4 h-4" />
           <span>
-            Ciclo {pomodoro.currentCycle} de {pomodoro.config.cyclesBeforeLongBreak}
+            Ciclo {pomodoro.state.cycleIndex} de {pomodoro.config.cyclesBeforeLongBreak}
           </span>
         </div>
       </div>
 
-      {pomodoro.state === "IDLE" ? (
+      {pomodoro.state.phase === "idle" ? (
         <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">Tempo de Foco (minutos)</label>

@@ -4,16 +4,12 @@ import { useState, useEffect } from "react"
 import { Bell, Globe, Palette, TestTube } from "lucide-react"
 import type { UserSettings } from "../../shared/types"
 import { chromeAPI, isChromeExtension } from "../../shared/chrome-mock"
+import { DEFAULT_SETTINGS } from "../../shared/constants"
 
 declare const chrome: any
 
 export default function SettingsView() {
-  const [settings, setSettings] = useState<UserSettings>({
-    analyticsConsent: false,
-    productiveKeywords: [],
-    distractingKeywords: [],
-    notificationsEnabled: true,
-  })
+  const [settings, setSettings] = useState<UserSettings>({ ...DEFAULT_SETTINGS })
 
   const [theme, setTheme] = useState("system")
   const [language, setLanguage] = useState("pt")
@@ -25,7 +21,7 @@ export default function SettingsView() {
   const loadSettings = async () => {
     const result = await chromeAPI.storage.sync.get("settings")
     if (result.settings) {
-      setSettings(result.settings)
+      setSettings({ ...DEFAULT_SETTINGS, ...(result.settings || {}) })
     }
   }
 
@@ -120,12 +116,12 @@ export default function SettingsView() {
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
-                checked={settings.notificationsEnabled}
-                onChange={(e) => updateSetting("notificationsEnabled", e.target.checked)}
+                checked={settings.notifications ?? settings.notificationsEnabled ?? true}
+                onChange={(e) => updateSetting("notifications", e.target.checked as any)}
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              <span className="ml-3 text-sm text-gray-400">{settings.notificationsEnabled ? "On" : "Off"}</span>
+              <span className="ml-3 text-sm text-gray-400">{(settings.notifications ?? settings.notificationsEnabled) ? "On" : "Off"}</span>
             </label>
           </div>
 

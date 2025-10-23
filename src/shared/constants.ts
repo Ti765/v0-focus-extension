@@ -20,8 +20,16 @@ export const ALARM_NAMES = {
 } as const;
 
 // Configurações padrão do usuário
-export const DEFAULT_SETTINGS = {
-  analyticsConsent: false,
+import type { UserSettings } from "./types";
+
+export const DEFAULT_SETTINGS: UserSettings = {
+  // Core settings matching UserSettings
+  theme: "system",
+  blockMode: "soft",
+  notifications: true,
+  syncWithCloud: false,
+  language: "pt-BR",
+  telemetry: false,
   productiveKeywords: [
     "tutorial", "documentation", "study", "learn", "course",
     "education", "research", "guide", "reference", "manual",
@@ -30,16 +38,18 @@ export const DEFAULT_SETTINGS = {
     "news", "entertainment", "game", "social", "video",
     "trending", "viral", "celebrity", "gossip", "meme",
   ],
+  // Backward compat
+  analyticsConsent: false,
   notificationsEnabled: true,
 };
 
 // Configuração padrão do Pomodoro
 export const DEFAULT_POMODORO_CONFIG = {
   focusMinutes: 25,
-  breakMinutes: 5,
+  shortBreakMinutes: 5,
   longBreakMinutes: 15,
   cyclesBeforeLongBreak: 4,
-  adaptiveMode: false,
+  autoStartBreaks: false,
 };
 
 // Constantes para a análise de conteúdo

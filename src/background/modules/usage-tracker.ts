@@ -215,7 +215,8 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
   const limit = (timeLimits as TimeLimitEntry[]).find((e) => e.domain === domain);
   if (!limit) return;
 
-  const limitSeconds = limit.limitMinutes * 60;
+  const limitMinutes = (limit.dailyMinutes ?? (limit as any).limitMinutes ?? 0);
+  const limitSeconds = limitMinutes * 60;
   if (totalSecondsToday >= limitSeconds) {
     const ruleId = generateLimitRuleId(domain);
 
@@ -244,7 +245,7 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           type: "basic",
           iconUrl: "icons/icon48.png",
           title: "Limite de Tempo Atingido",
-          message: `Você atingiu o limite de ${limit.limitMinutes} minutos em ${domain} hoje.`,
+          message: `Você atingiu o limite de ${limitMinutes} minutos em ${domain} hoje.`,
         });
       }
     } catch (e) {
@@ -269,9 +270,10 @@ export async function setTimeLimit(domain: string, limitMinutes: number) {
   if (limitMinutes > 0) {
     // adiciona/atualiza
     if (existingIndex >= 0) {
-      list[existingIndex].limitMinutes = limitMinutes;
+      (list[existingIndex] as any).dailyMinutes = limitMinutes;
     } else {
-      list.push({ domain: normalizedDomain, limitMinutes });
+      const brandDomain = (d: string) => d as any as import("../../shared/types").Domain;
+      list.push({ domain: brandDomain(normalizedDomain), dailyMinutes: limitMinutes } as any);
     }
 
     // se já excedeu hoje, aplica regra agora; se não, garante que não fique regra presa

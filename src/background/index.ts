@@ -18,7 +18,7 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_POMODORO_CONFIG,
 } from "../shared/constants";
-import type { AppState, PomodoroStatus } from "../shared/types";
+import type { AppState, PomodoroState } from "../shared/types";
 
 /** Bootstrap de todos os módulos do SW */
 async function bootstrap() {
@@ -131,11 +131,11 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       settings: DEFAULT_SETTINGS,
     };
 
-    const initialPomodoroStatus: PomodoroStatus = {
-      state: "IDLE",
-      timeRemaining: 0,
-      currentCycle: 0,
-      config: DEFAULT_POMODORO_CONFIG,
+    const initialPomodoroStatus: PomodoroState = {
+      phase: "idle",
+      isPaused: false,
+      cycleIndex: 0,
+      remainingMs: 0,
     };
 
     try {
@@ -144,7 +144,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         [STORAGE_KEYS.TIME_LIMITS]: initialState.timeLimits,
         [STORAGE_KEYS.DAILY_USAGE]: initialState.dailyUsage,
         [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: initialState.siteCustomizations,
-        [STORAGE_KEYS.POMODORO_STATUS]: initialPomodoroStatus,
+  [STORAGE_KEYS.POMODORO_STATUS]: { config: DEFAULT_POMODORO_CONFIG, state: initialPomodoroStatus },
       });
 
       await chrome.storage.sync.set({

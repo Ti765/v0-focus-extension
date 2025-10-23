@@ -7,7 +7,7 @@ import { Play, Square, Clock } from "lucide-react"
 export default function PomodoroTimer() {
   const { pomodoro, startPomodoro, stopPomodoro } = useStore()
   const [focusMinutes, setFocusMinutes] = useState(pomodoro.config.focusMinutes || 25)
-  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.breakMinutes || 5)
+  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.shortBreakMinutes || 5)
 
   const handleStart = () => {
     startPomodoro(focusMinutes, breakMinutes)
@@ -23,24 +23,24 @@ export default function PomodoroTimer() {
     <div className="space-y-4">
       <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
         <div className="text-sm font-medium text-gray-400 mb-2">
-          {pomodoro.state === "IDLE" && "Pronto para começar"}
-          {pomodoro.state === "FOCUS" && "🎯 Modo Foco"}
-          {pomodoro.state === "BREAK" && "☕ Pausa"}
+          {pomodoro.state.phase === "idle" && "Pronto para começar"}
+          {pomodoro.state.phase === "focus" && "🎯 Modo Foco"}
+          {(pomodoro.state.phase === "short_break" || pomodoro.state.phase === "long_break") && "☕ Pausa"}
         </div>
 
-        {pomodoro.state !== "IDLE" && (
-          <div className="text-4xl font-bold text-blue-400 mb-4">{formatTime(pomodoro.timeRemaining)}</div>
+        {pomodoro.state.phase !== "idle" && (
+          <div className="text-4xl font-bold text-blue-400 mb-4">{formatTime(Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000))}</div>
         )}
 
         <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
           <Clock className="w-4 h-4" />
           <span>
-            Ciclo {pomodoro.currentCycle} de {pomodoro.config.cyclesBeforeLongBreak}
+            Ciclo {pomodoro.state.cycleIndex} de {pomodoro.config.cyclesBeforeLongBreak}
           </span>
         </div>
       </div>
 
-      {pomodoro.state === "IDLE" ? (
+      {pomodoro.state.phase === "idle" ? (
         <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">Tempo de Foco (minutos)</label>

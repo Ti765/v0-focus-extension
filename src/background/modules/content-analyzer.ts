@@ -74,9 +74,10 @@ export async function handleContentAnalysisResult(result: ContentAnalysisResult)
       return;
     }
 
-    // Extrai domínio da URL analisada
-    const domain = extractDomain(result.url);
-    if (!domain) return;
+  // Extrai domínio da URL analisada
+  if (!result?.url) return;
+  const domain = extractDomain(result.url);
+  if (!domain) return;
 
     // Evita sugerir se o domínio já estiver na blacklist
     const { [STORAGE_KEYS.BLACKLIST]: blacklist = [] } = await chrome.storage.local.get(

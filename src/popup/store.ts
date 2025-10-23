@@ -1,6 +1,7 @@
 // src/popup/store.ts
 import { create } from "zustand";
 import type { AppState, Message } from "../shared/types";
+import { MESSAGE } from "../shared/types";
 import { chromeAPI } from "../shared/chrome-mock";
 import { deepEqual } from "../shared/utils";
 
@@ -117,7 +118,7 @@ interface PopupStore extends AppState {
   siteCustomizations: {},
   pomodoro: {
     config: { focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, cyclesBeforeLongBreak: 4, autoStartBreaks: false },
-    state: { phase: "idle", isPaused: false, cycleIndex: 0 },
+    state: { phase: "idle", isPaused: false, cycleIndex: 0, remainingMs: 0 },
   },
   settings: { theme: "system", language: "pt-BR", blockMode: "soft", notifications: true, syncWithCloud: false },
 };
@@ -137,7 +138,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   loadState: async () => {
     set({ isLoading: true, error: null });
     try {
-  const state = await sendMessageAsync<AppState>({ type: "GET_INITIAL_STATE", source: "popup-ui" } as unknown as Message);
+  const state = await sendMessageAsync<AppState>({ type: MESSAGE.GET_INITIAL_STATE, source: "popup-ui" } as unknown as Message);
       if (!state) {
         set({ isLoading: false });
         return;
@@ -168,7 +169,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
           setTimeout(() => listenerState.processedIds.delete(msg.id), 300000);
         }
 
-        if (msg.type === "STATE_UPDATED" && msg.payload) {
+        if (msg.type === MESSAGE.STATE_UPDATED && msg.payload) {
           const incoming: AppState = (msg.payload && (msg.payload as any).state) ? (msg.payload as any).state : (msg.payload as any);
 
           // Comparação simétrica (subset comparável) + hash
@@ -223,7 +224,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   addToBlacklist: async (domain) => {
     set({ error: null });
       try {
-  await sendMessageAsync({ type: "ADD_TO_BLACKLIST", payload: { domain }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync({ type: MESSAGE.ADD_TO_BLACKLIST, payload: { domain }, source: "popup-ui" } as unknown as Message);
       // estado final virá por STATE_UPDATED
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
@@ -236,7 +237,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   removeFromBlacklist: async (domain) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: "REMOVE_FROM_BLACKLIST", payload: { domain }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync({ type: MESSAGE.REMOVE_FROM_BLACKLIST, payload: { domain }, source: "popup-ui" } as unknown as Message);
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] removeFromBlacklist failed:", msg);
@@ -248,7 +249,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   setTimeLimit: async (domain, limitMinutes) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: "TIME_LIMIT_SET", payload: { domain, dailyMinutes: limitMinutes }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync({ type: MESSAGE.TIME_LIMIT_SET, payload: { domain, dailyMinutes: limitMinutes }, source: "popup-ui" } as unknown as Message);
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] setTimeLimit failed:", msg);
@@ -260,7 +261,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   startPomodoro: async (focusMinutes, breakMinutes) => {
     set({ error: null });
       try {
-  await sendMessageAsync({ type: "POMODORO_START", payload: { config: { focusMinutes, shortBreakMinutes: breakMinutes } }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync({ type: MESSAGE.POMODORO_START, payload: { config: { focusMinutes, shortBreakMinutes: breakMinutes } }, source: "popup-ui" } as unknown as Message);
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] startPomodoro failed:", msg);
@@ -272,7 +273,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   stopPomodoro: async () => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: "POMODORO_STOP", source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync({ type: MESSAGE.POMODORO_STOP, source: "popup-ui" } as unknown as Message);
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] stopPomodoro failed:", msg);
@@ -284,7 +285,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   toggleZenMode: async (preset) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: "TOGGLE_ZEN_MODE", payload: { preset }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync({ type: MESSAGE.TOGGLE_ZEN_MODE, payload: { preset }, source: "popup-ui" } as unknown as Message);
       // ação pode atuar em content scripts; SW deve emitir STATE_UPDATED se necessário
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
@@ -297,7 +298,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   updateSettings: async (partial) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: "STATE_PATCH", payload: { patch: { settings: partial } }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync({ type: MESSAGE.STATE_PATCH, payload: { patch: { settings: partial } }, source: "popup-ui" } as unknown as Message);
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] updateSettings failed:", msg);

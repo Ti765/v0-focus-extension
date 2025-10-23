@@ -1,5 +1,5 @@
 import { STORAGE_KEYS } from "../../shared/constants";
-import type { BlacklistEntry } from "../../shared/types";
+import type { BlacklistEntry, Domain } from "../../shared/types";
 import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain } from "../../shared/url";
 
@@ -48,9 +48,10 @@ export async function addToBlacklist(domain: string) {
     return;
   }
 
+  const brandDomain = (d: string) => d as Domain;
   const updated: BlacklistEntry[] = [
     ...blacklist,
-    { domain: normalized, addedAt: Date.now() },
+    { domain: brandDomain(normalized), addedAt: new Date().toISOString() },
   ];
 
   // If nothing changed (defensive), avoid writing and broadcasting
@@ -131,23 +132,27 @@ async function syncUserBlacklistRules() {
       const d = normalizeDomain(entry.domain);
       if (!d) continue;
 
-      let id = generateRuleIdForDomain(d);
+        let id = generateRuleIdForDomain(d);
+        // simple retry guard to avoid infinite loop if the ID space is exhausted
+        let attempts = 0;
+        const maxRetries = USER_BLACKLIST_RANGE;
 
-      // resolve colisão local/atual: incrementa e faz wrap no range
-      while (finalRuleIds.has(id) || existingUserRuleIds.has(id)) {
-        id++;
-        if (id >= USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE) {
-          id = USER_BLACKLIST_RULE_ID_START;
-        }
+        // resolve colisão local/atual: incrementa e faz wrap no range
+        while (finalRuleIds.has(id) || existingUserRuleIds.has(id)) {
+          attempts++;
+          if (attempts >= maxRetries) {
+            console.error("[v0] Unable to find free rule ID in USER_BLACKLIST range; aborting sync for domain:", d);
+            throw new Error("USER_BLACKLIST_RULE_ID_RANGE_EXHAUSTED");
+          }
 
-        // se ainda colidir após uma volta completa — range cheio (extremamente improvável)
-        if (finalRuleIds.has(id) || existingUserRuleIds.has(id)) {
-          // verifica se há alguma lacuna óbvia; se não, abandona
-          // (poderia persistir contador/estratégia mais elaborada se necessário)
+          id++;
+          if (id >= USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE) {
+            id = USER_BLACKLIST_RULE_ID_START;
+          }
+
+          // sai quando achar um ID livre
+          if (!finalRuleIds.has(id) && !existingUserRuleIds.has(id)) break;
         }
-        // sai quando achar um ID livre
-        if (!finalRuleIds.has(id) && !existingUserRuleIds.has(id)) break;
-      }
 
       finalRuleIds.add(id);
 

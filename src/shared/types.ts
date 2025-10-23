@@ -43,6 +43,8 @@ export interface TimeLimitEntry {
   dailyMinutes: number;
   /** reset diário/última rotação */
   lastResetAt?: RFC3339String;
+  // Legacy compatibility
+  limitMinutes?: number;
 }
 
 export interface DailyUsage {
@@ -86,6 +88,9 @@ export interface ContentAnalysisResult {
   categories: Record<string, number>;
   flagged: boolean;
   details?: string;
+  // Compatibility fields used in some modules
+  classification?: "distracting" | "neutral" | "productive";
+  url?: string;
 }
 
 /** Customizações específicas por domínio (ex.: YouTube). */
@@ -110,6 +115,11 @@ export interface UserSettings {
   syncWithCloud: boolean;
   timezone?: string;              // IANA TZ, ex.: "America/Sao_Paulo"
   telemetry?: boolean;            // métricas/telemetria
+  // Backward compatibility - UI currently references these in places
+  analyticsConsent?: boolean;
+  notificationsEnabled?: boolean;
+  productiveKeywords?: string[];
+  distractingKeywords?: string[];
 }
 
 /* =========================
@@ -177,6 +187,9 @@ export const MESSAGE = {
   PING: "PING",
   PONG: "PONG",
   ERROR: "ERROR",
+  // Content analysis / other
+  CONTENT_ANALYSIS_RESULT: "CONTENT_ANALYSIS_RESULT",
+  TOGGLE_ZEN_MODE: "TOGGLE_ZEN_MODE",
 } as const;
 
 export type MessageType = typeof MESSAGE[keyof typeof MESSAGE];
@@ -218,6 +231,12 @@ export interface PomodoroStartPayload {
 }
 export type PomodoroSimplePayload = Record<string, never>;
 
+// Content analysis
+export interface ContentAnalysisResultPayload { result: ContentAnalysisResult }
+
+// Toggle zen
+export interface ToggleZenPayload { preset?: string }
+
 // Erros/ping
 export interface ErrorPayload { code: string; message: string; details?: JSONValue; }
 export type PingPayload = { echo?: JSONValue };
@@ -241,7 +260,10 @@ export type Message =
   | BaseMessage<typeof MESSAGE.POMODORO_STOP, PomodoroSimplePayload>
   | BaseMessage<typeof MESSAGE.PING, PingPayload>
   | BaseMessage<typeof MESSAGE.PONG, PongPayload>
-  | BaseMessage<typeof MESSAGE.ERROR, ErrorPayload>;
+  | BaseMessage<typeof MESSAGE.ERROR, ErrorPayload>
+  | BaseMessage<typeof MESSAGE.CONTENT_ANALYSIS_RESULT, ContentAnalysisResultPayload>
+  | BaseMessage<typeof MESSAGE.TOGGLE_ZEN_MODE, ToggleZenPayload>;
+ 
 
 /** Respostas opcionais do SW (shape genérico) */
 export type MessageResponse<T = unknown> =

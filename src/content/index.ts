@@ -1,5 +1,6 @@
-import type { Message, ContentAnalysisResult } from "../shared/types";
+import type { Message, ContentAnalysisResult, MessageId } from "../shared/types";
 import { MAX_TEXT_LENGTH, STORAGE_KEYS } from "../shared/constants";
+import { MESSAGE } from "../shared/types";
 
 // ─────────────────────────────────────────────────────────────
 // Anti-reinjeção: marca que o CS já está presente
@@ -16,8 +17,8 @@ let hasAnalyzed = false;
 // ─────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   try {
-    if (message?.type === "TOGGLE_ZEN_MODE") {
-      toggleZenMode(message.payload?.preset);
+    if (message?.type === MESSAGE.TOGGLE_ZEN_MODE) {
+      toggleZenMode((message as any).payload?.preset);
       sendResponse?.({ success: true });
       return true; // mantém a porta aberta caso algo seja async
     }
@@ -37,8 +38,9 @@ const analyzePageContent = async () => {
   try {
     const text = document.body?.innerText?.slice(0, MAX_TEXT_LENGTH) ?? "";
     const url = location.href;
-    const result = await analyzeText(text, url);
-    await chrome.runtime.sendMessage({ type: "CONTENT_ANALYSIS_RESULT", payload: result } as Message);
+      const result = await analyzeText(text, url);
+      const id: MessageId = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`) as any;
+      await chrome.runtime.sendMessage({ type: MESSAGE.CONTENT_ANALYSIS_RESULT, id, source: "content-script", ts: Date.now(), payload: { result } } as unknown as Message);
   } catch (e) {
     console.error("[v0][CS] analyzePageContent error:", e);
   }
@@ -88,7 +90,8 @@ async function analyzeText(text: string, url: string): Promise<ContentAnalysisRe
     url,
     classification,
     score: distractingRatio,
-    timestamp: Date.now(),
+    categories: {},
+    flagged: classification === "distracting",
   };
 }
 
