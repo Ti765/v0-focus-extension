@@ -13,14 +13,23 @@ declare const chrome: any;
 type Tab = "pomodoro" | "blacklist" | "dashboard";
 
 export default function App() {
-  const { isLoading, error, loadState, listenForUpdates, setError } = useStore();
+  const { isLoading, error, setError } = useStore();
   const [activeTab, setActiveTab] = useState<Tab>("pomodoro");
 
   useEffect(() => {
+    // Use the store's static accessors to avoid stale closures and to ensure
+    // callers don't accidentally register multiple handlers.
+    const s = useStore.getState();
     // Carrega o estado inicial e inicia listener por atualizações do SW
-    loadState();
-    const unsubscribe = listenForUpdates();
-    return () => unsubscribe();
+    void s.loadState();
+    const unsubscribe = s.listenForUpdates();
+    return () => {
+      try {
+        unsubscribe?.();
+      } catch (e) {
+        // defensive
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

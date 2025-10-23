@@ -20,7 +20,13 @@ export async function notifyStateUpdate() {
         // no-op: state identical to last emitted
         return;
       }
-      (notifyStateUpdate as any)._lastEmitted = appState;
+      // store a deep clone to avoid later mutations affecting the saved snapshot
+      try {
+        (notifyStateUpdate as any)._lastEmitted = JSON.parse(JSON.stringify(appState));
+      } catch (e) {
+        // fallback: store as-is
+        (notifyStateUpdate as any)._lastEmitted = appState;
+      }
     } catch (e) {
       // if deepEqual fails for any reason, proceed with broadcast
     }

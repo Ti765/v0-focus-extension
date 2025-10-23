@@ -87,24 +87,31 @@ export const useStore = create<PopupStore>((set) => ({
       return () => void 0;
     }
 
-    // ensure we only register one handler per page lifetime
     const globalAny = globalThis as any;
-    if (!globalAny.__v0_store_listener_registered) {
+    // ensure we have a registration counter and handler slot
+    if (!globalAny.__v0_store_listener_count) globalAny.__v0_store_listener_count = 0;
+
+    // If no handler registered yet, create and register one
+    if (!globalAny.__v0_store_listener) {
       const handler = (msg: Message) => {
         if (msg?.type === "STATE_UPDATED" && msg.payload) {
+          const incoming = msg.payload as AppState;
           // Dedupe: only set if payload differs from current store
           set((curr) => {
-            const incoming = msg.payload as AppState;
-            // compare relevant parts (we compare whole AppState)
-            if (deepEqual({
-              blacklist: curr.blacklist,
-              timeLimits: curr.timeLimits,
-              dailyUsage: curr.dailyUsage,
-              pomodoro: curr.pomodoro,
-              siteCustomizations: curr.siteCustomizations,
-              settings: curr.settings,
-            }, incoming)) {
-              return { isLoading: false, error: null } as any; // no change
+            if (
+              deepEqual(
+                {
+                  blacklist: curr.blacklist,
+                  timeLimits: curr.timeLimits,
+                  dailyUsage: curr.dailyUsage,
+                  pomodoro: curr.pomodoro,
+                  siteCustomizations: curr.siteCustomizations,
+                  settings: curr.settings,
+                },
+                incoming
+              )
+            ) {
+              return curr as any; // real no-op, avoid triggering rerender
             }
             return { ...(incoming as AppState), isLoading: false, error: null } as any;
           });
@@ -112,12 +119,29 @@ export const useStore = create<PopupStore>((set) => ({
       };
 
       chrome.runtime.onMessage.addListener(handler);
-      globalAny.__v0_store_listener_registered = true;
-      // provide a cleanup function for callers if needed
-      return () => chrome.runtime.onMessage.removeListener(handler);
+      globalAny.__v0_store_listener = handler;
     }
-    // already registered: return noop cleanup
-    return () => void 0;
+
+    // increment subscriber count and return an unsubscribe that decrements it
+    globalAny.__v0_store_listener_count++;
+    let unsubscribed = false;
+    return () => {
+      if (unsubscribed) return;
+      unsubscribed = true;
+      try {
+        globalAny.__v0_store_listener_count--;
+        if (globalAny.__v0_store_listener_count <= 0) {
+          // remove the handler and clear global slots
+          try {
+            chrome.runtime.onMessage.removeListener(globalAny.__v0_store_listener);
+          } catch {}
+          globalAny.__v0_store_listener = undefined;
+          globalAny.__v0_store_listener_count = 0;
+        }
+      } catch (e) {
+        // defensive noop
+      }
+    };
   },
 
   // Ações que conversam com o Service Worker
