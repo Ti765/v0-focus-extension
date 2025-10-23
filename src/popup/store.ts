@@ -4,6 +4,7 @@ import type { AppState, Message } from "../shared/types";
 import { MESSAGE } from "../shared/types";
 import { chromeAPI } from "../shared/chrome-mock";
 import { deepEqual } from "../shared/utils";
+import debug from "../lib/debug";
 
 // Store instance-specific message listener state using WeakMap
 type MessageListenerState = {
@@ -30,17 +31,39 @@ function createListenerState(): MessageListenerState {
 // ───────────────────────────────────────────────────────────────
 
 /** Wrapper (callback→Promise) com tratamento de runtime.lastError */
+function generateId(): string {
+  return (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`).toString();
+}
+
+function createMessage<T extends string = string, P = unknown>(type: T, payload?: P, options?: { source?: any; skipNotify?: boolean; id?: string; ts?: number }): Message {
+  const id = options?.id ?? generateId();
+  const msg: any = {
+    type,
+    id,
+    source: options?.source ?? "popup-ui",
+    ts: options?.ts ?? Date.now(),
+  };
+  if (payload !== undefined) msg.payload = payload;
+  if (options?.skipNotify) msg.skipNotify = true;
+  return msg as Message;
+}
+
 function sendMessageAsync<T = any>(message: Message): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     try {
       // Marque a mensagem com um ID para dedupe no receiver
-      const id = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).toString();
-      const msg: Message = { ...message, id, ts: Date.now(), source: message.source ?? "popup-ui" } as any;
+      const runtimeSend = (globalThis as any).chrome?.runtime?.sendMessage ?? chromeAPI.runtime.sendMessage;
+      const shouldPreserve = (message as any)?.skipNotify === true;
+      const msg: any = shouldPreserve
+        ? message
+        : { ...(message as any), id: (message as any).id ?? generateId(), ts: (message as any).ts ?? Date.now(), source: (message as any).source ?? "popup-ui" };
 
+      // debug: log outgoing message shape
+      debug('[dbg] sendMessageAsync -> outgoing', msg);
       // MV3 suporta Promise; porém manter callback aumenta compatibilidade
-      chromeAPI.runtime.sendMessage(msg as any, (response: T) => {
-        const err = (chromeAPI.runtime as any).lastError;
-        if (err) return reject(new Error(err.message));
+      runtimeSend(msg as any, (response: T) => {
+        const lastErr = (globalThis as any).chrome?.runtime?.lastError ?? (chromeAPI.runtime as any).lastError;
+        if (lastErr) return reject(new Error(lastErr.message));
         resolve(response);
       });
     } catch (e) {
@@ -84,7 +107,7 @@ function pickComparable(s: AppState) {
 // Tipagem do store
 // ───────────────────────────────────────────────────────────────
 
-interface PopupStore extends AppState {
+export interface PopupStore extends AppState {
   isLoading: boolean;
   error: string | null;
 
@@ -138,7 +161,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   loadState: async () => {
     set({ isLoading: true, error: null });
     try {
-  const state = await sendMessageAsync<AppState>({ type: MESSAGE.GET_INITIAL_STATE, source: "popup-ui" } as unknown as Message);
+  const state = await sendMessageAsync<AppState>(createMessage(MESSAGE.GET_INITIAL_STATE, undefined, { source: "popup-ui" }));
       if (!state) {
         set({ isLoading: false });
         return;
@@ -162,6 +185,8 @@ export const useStore = create<PopupStore>()((set, get) => ({
         if (!msg || typeof msg !== "object") return;
 
         // Dedupe por id
+          // debug: log incoming message
+          debug('[dbg] listenForUpdates -> incoming message', msg);
         if (msg.id && listenerState.processedIds.has(msg.id)) return;
         if (msg.id) {
           listenerState.processedIds.add(msg.id);
@@ -188,7 +213,8 @@ export const useStore = create<PopupStore>()((set, get) => ({
       };
 
       try {
-        chromeAPI.runtime.onMessage.addListener?.(handler);
+        const runtimeOnMessage = (globalThis as any).chrome?.runtime?.onMessage ?? (chromeAPI.runtime as any).onMessage;
+        runtimeOnMessage?.addListener?.(handler);
         listenerState.listener = handler;
       } catch (e) {
         console.error("[store] failed to register onMessage listener", e);
@@ -210,7 +236,8 @@ export const useStore = create<PopupStore>()((set, get) => ({
       }
       if (listenerState.listenerCount === 0 && listenerState.listener) {
         try {
-          chromeAPI.runtime.onMessage.removeListener?.(listenerState.listener);
+          const runtimeOnMessage = (globalThis as any).chrome?.runtime?.onMessage ?? (chromeAPI.runtime as any).onMessage;
+          runtimeOnMessage?.removeListener?.(listenerState.listener);
         } catch {}
         listenerState.listener = undefined;
         listenerState.lastStateHash = "";
@@ -224,7 +251,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   addToBlacklist: async (domain) => {
     set({ error: null });
       try {
-  await sendMessageAsync({ type: MESSAGE.ADD_TO_BLACKLIST, payload: { domain }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync(createMessage(MESSAGE.ADD_TO_BLACKLIST, { domain }, { source: "popup-ui", skipNotify: true }));
       // estado final virá por STATE_UPDATED
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
@@ -237,7 +264,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   removeFromBlacklist: async (domain) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: MESSAGE.REMOVE_FROM_BLACKLIST, payload: { domain }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync(createMessage(MESSAGE.REMOVE_FROM_BLACKLIST, { domain }, { source: "popup-ui", skipNotify: true }));
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] removeFromBlacklist failed:", msg);
@@ -249,7 +276,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   setTimeLimit: async (domain, limitMinutes) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: MESSAGE.TIME_LIMIT_SET, payload: { domain, dailyMinutes: limitMinutes }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync(createMessage(MESSAGE.TIME_LIMIT_SET, { domain, dailyMinutes: limitMinutes }, { source: "popup-ui" }));
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] setTimeLimit failed:", msg);
@@ -261,7 +288,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   startPomodoro: async (focusMinutes, breakMinutes) => {
     set({ error: null });
       try {
-  await sendMessageAsync({ type: MESSAGE.POMODORO_START, payload: { config: { focusMinutes, shortBreakMinutes: breakMinutes } }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync(createMessage(MESSAGE.POMODORO_START, { config: { focusMinutes, shortBreakMinutes: breakMinutes } }, { source: "popup-ui" }));
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] startPomodoro failed:", msg);
@@ -273,7 +300,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   stopPomodoro: async () => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: MESSAGE.POMODORO_STOP, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync(createMessage(MESSAGE.POMODORO_STOP, undefined, { source: "popup-ui" }));
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] stopPomodoro failed:", msg);
@@ -285,7 +312,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   toggleZenMode: async (preset) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: MESSAGE.TOGGLE_ZEN_MODE, payload: { preset }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync(createMessage(MESSAGE.TOGGLE_ZEN_MODE, { preset }, { source: "popup-ui" }));
       // ação pode atuar em content scripts; SW deve emitir STATE_UPDATED se necessário
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
@@ -298,7 +325,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
   updateSettings: async (partial) => {
     set({ error: null });
   try {
-  await sendMessageAsync({ type: MESSAGE.STATE_PATCH, payload: { patch: { settings: partial } }, source: "popup-ui" } as unknown as Message);
+  await sendMessageAsync(createMessage(MESSAGE.STATE_PATCH, { patch: { settings: partial } }, { source: "popup-ui" }));
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] updateSettings failed:", msg);

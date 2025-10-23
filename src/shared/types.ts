@@ -4,25 +4,20 @@
  * Utilitários básicos
  * ========================= */
 
-/** Nominal/Branded type (rótulo no tipo, sem custo em runtime). */
 export type Brand<T, B extends string> = T & { readonly __brand: B };
 
-/** JSON "puro" (serializável) — útil p/ mensagens e storage. */
 export type JSONPrimitive = string | number | boolean | null;
 export type JSONValue = JSONPrimitive | JSONObject | JSONArray;
 export type JSONObject = { [k: string]: JSONValue };
-export type JSONArray = JSONValue[]; // ref.: definição canônica de JSONValue.
+export type JSONArray = JSONValue[];
 
-/** Datas */
-export type RFC3339String = string; // e.g. "2025-10-23T13:45:00Z" (subset ISO 8601).
-export type ISODateString = string; // "YYYY-MM-DD" (data sem hora).
+export type RFC3339String = string;
+export type ISODateString = string;
 
-/** IDs e afins */
 export type MessageId = Brand<string, "MessageId">;
 export type UserId = Brand<string, "UserId">;
 export type Domain = Brand<string, "Domain">;
 
-/** Auxiliares */
 export type Nullable<T> = T | null;
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 export type NonEmptyArray<T> = [T, ...T[]];
@@ -39,19 +34,16 @@ export interface BlacklistEntry {
 
 export interface TimeLimitEntry {
   domain: Domain;
-  /** minutos permitidos por dia para o domínio */
   dailyMinutes: number;
-  /** reset diário/última rotação */
   lastResetAt?: RFC3339String;
   // Legacy compatibility
   limitMinutes?: number;
 }
 
 export interface DailyUsage {
-  /** data "YYYY-MM-DD" */
   date: ISODateString;
   totalMinutes: number;
-  perDomain: Record<string, number>; // domain -> minutos
+  perDomain: Record<string, number>;
 }
 
 /* =========================
@@ -61,19 +53,17 @@ export interface DailyUsage {
 export type PomodoroPhase = "idle" | "focus" | "short_break" | "long_break";
 
 export interface PomodoroConfig {
-  focusMinutes: number;         // ex.: 25
-  shortBreakMinutes: number;    // ex.: 5
-  longBreakMinutes: number;     // ex.: 15
-  cyclesBeforeLongBreak: number; // ex.: 4
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  cyclesBeforeLongBreak: number;
   autoStartBreaks: boolean;
 }
 
 export interface PomodoroState {
   phase: PomodoroPhase;
   isPaused: boolean;
-  /** ciclo atual (0-based) dentro do conjunto até o long break */
   cycleIndex: number;
-  /** datas/timestamps em RFC3339 — fáceis de trafegar em mensagens */
   startedAt?: RFC3339String;
   endsAt?: RFC3339String;
   remainingMs?: number;
@@ -93,14 +83,13 @@ export interface ContentAnalysisResult {
   url?: string;
 }
 
-/** Customizações específicas por domínio (ex.: YouTube). */
 export interface YouTubeCustomization {
   hideHomepage: boolean;
   hideShorts: boolean;
   hideComments: boolean;
   hideRecommendations: boolean;
 }
-export type SiteCustomization = YouTubeCustomization; // extensível no futuro se precisar
+export type SiteCustomization = YouTubeCustomization;
 export type SiteCustomizationMap = Record<string, SiteCustomization>;
 
 /* =========================
@@ -109,12 +98,12 @@ export type SiteCustomizationMap = Record<string, SiteCustomization>;
 
 export interface UserSettings {
   theme: "system" | "light" | "dark";
-  language?: string;              // "pt-BR", "en-US", ...
+  language?: string;
   blockMode: "soft" | "strict";
   notifications: boolean;
   syncWithCloud: boolean;
-  timezone?: string;              // IANA TZ, ex.: "America/Sao_Paulo"
-  telemetry?: boolean;            // métricas/telemetria
+  timezone?: string;
+  telemetry?: boolean;
   // Backward compatibility - UI currently references these in places
   analyticsConsent?: boolean;
   notificationsEnabled?: boolean;
@@ -129,33 +118,24 @@ export interface UserSettings {
 export interface AppState {
   isLoading: boolean;
   error: Nullable<string>;
-
-  /** Simples e performático p/ UI; detalhes ficam em TimeLimitEntry[] etc. */
-  blacklist: string[];                 // lista de domínios (normalizados)
+  blacklist: string[];
   timeLimits: TimeLimitEntry[];
-  dailyUsage: Record<string, DailyUsage>; // chave = ISODateString
-
+  dailyUsage: Record<string, DailyUsage>;
   siteCustomizations: SiteCustomizationMap;
-
   pomodoro: {
     config: PomodoroConfig;
     state: PomodoroState;
   };
-
   settings: UserSettings;
 }
 
 /* =========================
  * Mensageria (MV3) — UI <-> SW
- * =========================
- * Unions discriminadas + payloads tipados.
- * Segue o guia oficial: mensagens JSON-serializáveis; para respostas
- * assíncronas, o listener do SW deve `return true`/Promise.
- */
+ * ========================= */
 
 export type ContextSource =
   | "service-worker"
-  | "panel-ui"     // página de opções
+  | "panel-ui"
   | "popup-ui"
   | "content-script";
 
@@ -187,6 +167,7 @@ export const MESSAGE = {
   PING: "PING",
   PONG: "PONG",
   ERROR: "ERROR",
+
   // Content analysis / other
   CONTENT_ANALYSIS_RESULT: "CONTENT_ANALYSIS_RESULT",
   TOGGLE_ZEN_MODE: "TOGGLE_ZEN_MODE",
@@ -204,40 +185,33 @@ export interface BaseMessage<T extends MessageType = MessageType, P = unknown> {
 
 /* ===== Payloads ===== */
 
-// Estado
 export interface StateUpdatedPayload { state: AppState; }
 export interface StatePatchPayload { patch: DeepPartial<AppState>; }
 
-// Blacklist
 export interface AddToBlacklistPayload { domain: string; }
 export interface RemoveFromBlacklistPayload { domain: string; }
 
-// Limites
 export interface TimeLimitSetPayload extends TimeLimitEntry {}
 export interface TimeLimitRemovePayload { domain: string; }
 
-// Customização
 export interface SiteCustomizationUpdatedPayload {
   domain: string; // ex.: "youtube.com"
   config: YouTubeCustomization;
 }
 
-// Pomodoro
 export interface PomodoroStartPayload {
-  /** sobrescrever config atual (opcional) */
   config?: Partial<PomodoroConfig>;
-  /** opcional: duração custom de foco em minutos */
   focusMinutesOverride?: number;
 }
 export type PomodoroSimplePayload = Record<string, never>;
 
-// Content analysis
-export interface ContentAnalysisResultPayload { result: ContentAnalysisResult }
+// Ampliado: aceita payload antigo (direto) ou novo ({ result })
+export type ContentAnalysisResultPayload =
+  | ContentAnalysisResult
+  | { result: ContentAnalysisResult };
 
-// Toggle zen
 export interface ToggleZenPayload { preset?: string }
 
-// Erros/ping
 export interface ErrorPayload { code: string; message: string; details?: JSONValue; }
 export type PingPayload = { echo?: JSONValue };
 export type PongPayload = { echo?: JSONValue };
@@ -263,7 +237,6 @@ export type Message =
   | BaseMessage<typeof MESSAGE.ERROR, ErrorPayload>
   | BaseMessage<typeof MESSAGE.CONTENT_ANALYSIS_RESULT, ContentAnalysisResultPayload>
   | BaseMessage<typeof MESSAGE.TOGGLE_ZEN_MODE, ToggleZenPayload>;
- 
 
 /** Respostas opcionais do SW (shape genérico) */
 export type MessageResponse<T = unknown> =
@@ -324,7 +297,5 @@ export function isMessageOfType<T extends MessageType>(
 }
 
 export function isJsonValue(_: unknown): _ is JSONValue {
-  // guard "amplo": apenas garante que não é função/undefined
-  // (JSON real será validado em runtime conforme necessidade)
   return _ !== undefined && typeof _ !== "function";
 }

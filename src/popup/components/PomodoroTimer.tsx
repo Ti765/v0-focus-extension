@@ -1,68 +1,87 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useStore } from "../store"
-import { Play, Square, Clock } from "lucide-react"
+import { useState } from "react";
+import { useStore } from "../store";
+import { Play, Square, Clock } from "lucide-react";
+
+function formatTime(seconds: number) {
+  const s = Math.max(0, seconds | 0);
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
 
 export default function PomodoroTimer() {
-  const { pomodoro, startPomodoro, stopPomodoro } = useStore()
-  const [focusMinutes, setFocusMinutes] = useState(pomodoro.config.focusMinutes || 25)
-  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.shortBreakMinutes || 5)
+  const { pomodoro, startPomodoro, stopPomodoro } = useStore((s: any) => ({
+    pomodoro: s.pomodoro,
+    startPomodoro: s.startPomodoro,
+    stopPomodoro: s.stopPomodoro,
+  }));
+
+  // Respeita seu shape atual: shortBreakMinutes existe em PomodoroConfig
+  const [focusMinutes, setFocusMinutes] = useState(pomodoro.config.focusMinutes || 25);
+  const [breakMinutes, setBreakMinutes] = useState(pomodoro.config.shortBreakMinutes || 5);
 
   const handleStart = () => {
-    startPomodoro(focusMinutes, breakMinutes)
-  }
+    // Mantém assinatura do store (dois números) — se desejar,
+    // você pode migrar para { config: { focusMinutes, shortBreakMinutes } } no store.
+    startPomodoro(focusMinutes, breakMinutes);
+  };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-  }
+  const phase = pomodoro.state.phase;
+  const remainingSeconds = Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000);
+  const cycleText = `Ciclo ${pomodoro.state.cycleIndex + 1} de ${pomodoro.config.cyclesBeforeLongBreak}`;
 
   return (
     <div className="space-y-4">
       <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
         <div className="text-sm font-medium text-gray-400 mb-2">
-          {pomodoro.state.phase === "idle" && "Pronto para começar"}
-          {pomodoro.state.phase === "focus" && "🎯 Modo Foco"}
-          {(pomodoro.state.phase === "short_break" || pomodoro.state.phase === "long_break") && "☕ Pausa"}
+          {phase === "idle" && "Pronto para começar"}
+          {phase === "focus" && "🎯 Modo Foco"}
+          {(phase === "short_break" || phase === "long_break") && "☕ Pausa"}
         </div>
 
-        {pomodoro.state.phase !== "idle" && (
-          <div className="text-4xl font-bold text-blue-400 mb-4">{formatTime(Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000))}</div>
+        {phase !== "idle" && (
+          <div className="text-4xl font-bold text-blue-400 mb-4">
+            {formatTime(remainingSeconds)}
+          </div>
         )}
 
         <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
           <Clock className="w-4 h-4" />
-          <span>
-            Ciclo {pomodoro.state.cycleIndex} de {pomodoro.config.cyclesBeforeLongBreak}
-          </span>
+          <span>{cycleText}</span>
         </div>
       </div>
 
-      {pomodoro.state.phase === "idle" ? (
+      {phase === "idle" ? (
         <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Tempo de Foco (minutos)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Tempo de Foco (minutos)
+            </label>
             <input
               type="number"
               value={focusMinutes}
               onChange={(e) => setFocusMinutes(Number(e.target.value))}
               className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500/50"
-              min="1"
-              max="120"
+              min={1}
+              max={120}
+              inputMode="numeric"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Tempo de Pausa (minutos)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Tempo de Pausa (minutos)
+            </label>
             <input
               type="number"
               value={breakMinutes}
               onChange={(e) => setBreakMinutes(Number(e.target.value))}
               className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500/50"
-              min="1"
-              max="60"
+              min={1}
+              max={60}
+              inputMode="numeric"
             />
           </div>
 
@@ -93,5 +112,5 @@ export default function PomodoroTimer() {
         </ul>
       </div>
     </div>
-  )
+  );
 }

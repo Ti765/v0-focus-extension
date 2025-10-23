@@ -5,20 +5,18 @@ import { useState, useRef } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { normalizeDomain } from "../../shared/url";
 import { useStore } from "../store";
-import { useShallow } from "zustand/react/shallow";
+import debug from "../../lib/debug";
 
 export default function BlacklistManager(): JSX.Element {
   // Seleciona apenas o que a UI precisa, com shallow compare para evitar rerenders desnecessários
   const { blacklist, addToBlacklist, removeFromBlacklist, error, setError } =
-    useStore(
-      useShallow((s) => ({
-        blacklist: s.blacklist as string[],
-        addToBlacklist: s.addToBlacklist as (domain: string) => Promise<void> | void,
-        removeFromBlacklist: s.removeFromBlacklist as (domain: string) => Promise<void> | void,
-        error: s.error as string | null,
-        setError: s.setError as (msg: string | null) => void,
-      }))
-    );
+    useStore((s: any) => ({
+      blacklist: s.blacklist as string[] | any[],
+      addToBlacklist: s.addToBlacklist as (domain: string) => Promise<void> | void,
+      removeFromBlacklist: s.removeFromBlacklist as (domain: string) => Promise<void> | void,
+      error: s.error as string | null,
+      setError: s.setError as (msg: string | null) => void,
+    }));
 
   const [newDomain, setNewDomain] = useState("");
   const sendingRef = useRef(false); // trava simples contra cliques múltiplos
@@ -51,6 +49,9 @@ export default function BlacklistManager(): JSX.Element {
     sendingRef.current = true;
 
     try {
+      // Diagnostic log for smoke debugging: show what we're sending to store
+      // eslint-disable-next-line no-console
+      debug('[dbg] BlacklistManager.handleAdd -> normalized:', normalized);
       // Dispara ação do store (que deve conversar com o SW; o estado final volta por broadcast/state update)
       await addToBlacklist?.(normalized);
       setNewDomain(""); // limpa input apenas após tentativa
@@ -93,21 +94,31 @@ export default function BlacklistManager(): JSX.Element {
               Nenhum site bloqueado ainda.
             </div>
           ) : (
-            blacklist.map((site) => (
-              <div
-                key={site}
-                className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/10"
-              >
-                <span className="text-white font-mono text-sm">{site}</span>
-                <button
-                  onClick={() => handleRemove(site)}
-                  className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
-                  aria-label={`Remover ${site}`}
+            blacklist.map((site) => {
+              // blacklist items may be strings or objects (legacy). Normalize here to be defensive.
+              const domain =
+                typeof site === "string"
+                  ? site
+                  : site && typeof site === "object" && "domain" in site
+                  ? String((site as any).domain)
+                  : String(site);
+
+              return (
+                <div
+                  key={domain}
+                  className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/10"
                 >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))
+                  <span className="text-white font-mono text-sm">{domain}</span>
+                  <button
+                    onClick={() => handleRemove(domain)}
+                    className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
+                    aria-label={`Remover ${domain}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })
           )}
         </div>
 

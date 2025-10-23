@@ -18,7 +18,8 @@ const createStorageChangeHub = () => {
     addListener: (cb: StorageChangeListener) => listeners.add(cb),
     removeListener: (cb: StorageChangeListener) => listeners.delete(cb),
     emit: (changes: Record<string, ChromeStorageChangeInfo>, areaName: string) => {
-      listeners.forEach((cb) => cb(changes, areaName));
+      // make a copy to avoid mutation during iteration
+      Array.from(listeners).forEach((cb) => cb(changes, areaName));
     },
     hasListeners: () => listeners.size > 0,
   };
@@ -33,7 +34,12 @@ interface ChromeStorage {
 interface ChromeRuntime {
   id?: string;
   sendMessage: <T = any>(message: any, callback?: (response: T) => void) => void;
-  onMessage: { addListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void; removeListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void };
+  onMessage: {
+    addListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void;
+    removeListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void;
+    // test helper: dispatch a message to registered listeners
+    emit?: (msg: any, sender?: any, sendResponse?: any) => void;
+  };
   lastError: null | { message: string };
 }
 
@@ -81,23 +87,44 @@ const syncMem: Record<string, any> = {};
 const mockChromeAPI: { runtime: ChromeRuntime; storage: ChromeStorage } = {
   runtime: {
     id: "mock-extension-id",
-    sendMessage: (_message: any, callback?: (response: any) => void) => {
-      // very small mock: echo minimal response
+    sendMessage: (message: any, callback?: (response: any) => void) => {
+      void message;
+      // very small mock: echo minimal response and set lastError to null
+      (mockChromeAPI.runtime as any).lastError = null;
       if (callback) callback({ ok: true });
     },
-    onMessage: {
-      addListener: () => {},
-      removeListener: () => {},
-    },
-    lastError: null,
+      // simple listener registry for onMessage to allow tests to register handlers
+        onMessage: (function () {
+          const listeners = new Set<(msg: any, sender: any, sendResponse: any) => void>();
+          const obj = {
+            addListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => listeners.add(cb),
+            removeListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => listeners.delete(cb),
+            // helper to dispatch messages to registered listeners (used by tests)
+            emit: (msg: any, sender: any = {}, sendResponse?: any) => {
+              Array.from(listeners).forEach((cb) => {
+                try {
+                  cb(msg, sender, sendResponse ?? (() => {}));
+                } catch (e) {
+                  // swallow test errors here
+                }
+              });
+            },
+          } as {
+            addListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void;
+            removeListener: (cb: (msg: any, sender: any, sendResponse: any) => void) => void;
+            emit: (msg: any, sender?: any, sendResponse?: any) => void;
+          };
+          return obj;
+        })(),
+      lastError: null,
   },
   storage: {
     local: makeMockStorageArea(localMem, storageHub, "local"),
     sync: makeMockStorageArea(syncMem, storageHub, "sync"),
     onChanged: {
-      addListener: storageHub.addListener,
-      removeListener: storageHub.removeListener,
-      emit: storageHub.emit,
+      addListener: (cb: StorageChangeListener) => storageHub.addListener(cb),
+      removeListener: (cb: StorageChangeListener) => storageHub.removeListener(cb),
+      emit: (changes: Record<string, ChromeStorageChangeInfo>, areaName: string) => storageHub.emit(changes, areaName),
     },
   },
 };

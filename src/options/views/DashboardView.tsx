@@ -6,11 +6,11 @@ import { Pie, Bar, Line } from "react-chartjs-2";
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title);
 
 export default function DashboardView() {
-  const { dailyUsage } = useStore();
-
+  // subscribe only to dailyUsage to avoid re-renders on unrelated state changes
+  const dailyUsage = useStore((s: any) => s.dailyUsage ?? {});
   // --- PREPARAÇÃO DOS DADOS ---
   const today = new Date().toISOString().split("T")[0];
-  const todayData = dailyUsage[today] || {};
+  const todayData = (dailyUsage?.[today] && dailyUsage[today].perDomain) || {};
 
   // CORREÇÃO: Adicionados tipos explícitos para os parâmetros 'a' e 'b' na função sort.
   // A variável 'sortedDomains' agora é usada para alimentar todos os gráficos.

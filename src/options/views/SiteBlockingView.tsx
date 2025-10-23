@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Youtube, Plus, Trash2 } from "lucide-react";
 
 import { chromeAPI } from "../../shared/chrome-mock";
+import debug from "../../lib/debug";
 import { deepEqual } from "../../shared/utils";
 import { normalizeDomain } from "../../shared/url";
 import type { 
@@ -72,6 +73,9 @@ export default function SiteBlockingView(): JSX.Element {
           (await chromeAPI?.storage?.local?.get("blacklist")) ?? {};
         const { siteCustomizations } =
           (await chromeAPI?.storage?.local?.get("siteCustomizations")) ?? {};
+  // debug
+  debug('[dbg] SiteBlockingView initial load blacklist:', blacklist);
+  debug('[dbg] SiteBlockingView initial load siteCustomizations:', siteCustomizations);
         setBlockedSites(toDomains(blacklist));
         setCustomizations((siteCustomizations as SiteCustomizations) ?? {});
       } catch (e) {
@@ -92,11 +96,13 @@ export default function SiteBlockingView(): JSX.Element {
 
       if (changes.blacklist) {
         const next = toDomains(changes.blacklist.newValue);
+  debug('[dbg] SiteBlockingView storage.onChanged blacklist:', changes.blacklist);
         if (!deepEqual(next, blockedRef.current)) setBlockedSites(next);
       }
       if (changes.siteCustomizations) {
         const next = (changes.siteCustomizations.newValue ??
           {}) as SiteCustomizations;
+  debug('[dbg] SiteBlockingView storage.onChanged siteCustomizations:', changes.siteCustomizations);
         if (!deepEqual(next, customRef.current)) setCustomizations(next);
       }
     };
@@ -133,14 +139,13 @@ export default function SiteBlockingView(): JSX.Element {
 
     if (sendingRef.current) return;
     sendingRef.current = true;
-    try {
+      try {
+  debug('[dbg] SiteBlockingView.addBlockedSite -> sendMessage', { type: 'ADD_TO_BLACKLIST', payload: { domain: normalized }, skipNotify: true });
       await sendMessage({
         type: "ADD_TO_BLACKLIST",
         payload: { domain: normalized },
-        source: "panel-ui",
-        id: crypto.randomUUID() as MessageId,
-        ts: Date.now(),
-      });
+        skipNotify: true,
+      } as any);
       // atualização real virá via storage.onChanged
     } catch (e) {
       console.error("[SiteBlockingView] addBlockedSite failed", e);
@@ -162,13 +167,12 @@ export default function SiteBlockingView(): JSX.Element {
     if (sendingRef.current) return;
     sendingRef.current = true;
     try {
+  debug('[dbg] SiteBlockingView.removeBlockedSite -> sendMessage', { type: 'REMOVE_FROM_BLACKLIST', payload: { domain }, skipNotify: true });
       await sendMessage({
         type: "REMOVE_FROM_BLACKLIST",
         payload: { domain },
-        source: "panel-ui",
-        id: crypto.randomUUID() as MessageId,
-        ts: Date.now(),
-      });
+        skipNotify: true,
+      } as any);
     } catch (e) {
       console.error("[SiteBlockingView] removeBlockedSite failed", e);
       try {

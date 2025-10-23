@@ -13,7 +13,11 @@ declare const chrome: any;
 type Tab = "pomodoro" | "blacklist" | "dashboard";
 
 export default function App() {
-  const { isLoading, error, setError } = useStore();
+  const { isLoading, error, setError } = useStore((s: any) => ({
+    isLoading: s.isLoading,
+    error: s.error,
+    setError: s.setError,
+  }));
   const [activeTab, setActiveTab] = useState<Tab>("pomodoro");
 
   useEffect(() => {

@@ -101,10 +101,11 @@ async function injectContentScriptIntoAllTabs() {
         // Ignora abas protegidas/exceções esperadas
         const msg = String(e?.message ?? e);
         if (
-          msg.includes("Cannot access contents of url") ||
+          msg.includes("Cannot access contents") ||
           msg.includes("No matching signature") ||
           msg.includes("Cannot access a chrome:// URL") ||
-          msg.includes("The extensions gallery cannot be scripted")
+          msg.includes("The extensions gallery cannot be scripted") ||
+          msg.includes("The page is not available")
         ) {
           // ok, apenas não é possível injetar nessa aba
         } else {

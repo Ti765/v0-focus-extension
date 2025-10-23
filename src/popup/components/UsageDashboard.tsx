@@ -6,17 +6,19 @@ import { Pie, Bar } from "react-chartjs-2";
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title);
 
 export default function UsageDashboard() {
-  const { dailyUsage } = useStore();
+  // Subscribe only to dailyUsage to avoid re-render storms when unrelated parts of the store change
+  const dailyUsage = useStore((s: any) => s.dailyUsage ?? {});
 
   // --- PREPARAÇÃO DOS DADOS ---
   const today = new Date().toISOString().split("T")[0];
-  const todayData = dailyUsage[today] || {};
+  const todayData = (dailyUsage?.[today] && dailyUsage[today].perDomain) || {};
+  const todayDataRecord: Record<string, number> = todayData as Record<string, number>;
 
-  const sortedDomains = Object.entries(todayData)
-    .sort(([, a]: [string, number], [, b]: [string, number]) => b - a)
+  const sortedDomains = Object.entries(todayDataRecord)
+    .sort(([, a], [, b]) => (Number(b) || 0) - (Number(a) || 0))
     .slice(0, 5); // Limitar a 5 para melhor visualização no popup
 
-  const totalSeconds = Object.values(todayData).reduce((sum: number, time: number) => sum + time, 0);
+  const totalSeconds = Object.values(todayDataRecord).reduce((sum: number, time: number) => sum + (Number(time) || 0), 0);
   const totalMinutes = Math.floor(totalSeconds / 60);
   const totalHours = Math.floor(totalMinutes / 60);
   const remainingMinutes = totalMinutes % 60;

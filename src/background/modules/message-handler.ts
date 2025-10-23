@@ -32,10 +32,19 @@ export async function notifyStateUpdate() {
       // if deepEqual fails for any reason, proceed with broadcast
     }
     // broadcast: use callback and check chrome.runtime.lastError to avoid
-    // noisy "Receiving end does not exist" when no UI is open.
+    // noisy benign errors when UIs close (like popup/options). Ignore both
+    // "Receiving end does not exist" and the port-closed message.
   chrome.runtime.sendMessage({ type: MESSAGE.STATE_UPDATED, payload: { state: appState } }, () => {
       const err = chrome.runtime.lastError;
-      if (err && !/Receiving end does not exist/.test(err.message || "")) {
+      // Use an explicit, anchored whitelist of ignorable error message prefixes so changes
+      // in Chrome's exact text won't accidentally bypass the filter.
+      const errMsg = err?.message ?? "";
+      const ignorablePrefixes = [
+        "Receiving end does not exist",
+        "The message port closed before a response was received",
+      ];
+      const isIgnorable = ignorablePrefixes.some((p) => errMsg === p || errMsg.startsWith(p));
+      if (err && !isIgnorable) {
         console.warn("[v0] notifyStateUpdate lastError:", err.message);
       }
     });
@@ -88,7 +97,11 @@ export async function getAppState(): Promise<AppState> {
   return {
     isLoading: false,
     error: null,
-    blacklist: local[STORAGE_KEYS.BLACKLIST] || [],
+    blacklist: ((local[STORAGE_KEYS.BLACKLIST] || []) as any[]).map((entry) =>
+      typeof entry === "object" && entry !== null && "domain" in entry
+        ? String((entry as any).domain)
+        : String(entry)
+    ),
     timeLimits: local[STORAGE_KEYS.TIME_LIMITS] || [],
     dailyUsage: local[STORAGE_KEYS.DAILY_USAGE] || {},
     pomodoro:
@@ -201,10 +214,26 @@ export async function handleMessage(
     }
 
     case MESSAGE.STATE_PATCH: {
-      const { [STORAGE_KEYS.SETTINGS]: settings } =
-        await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
-      const updatedSettings = { ...(settings ?? {}), ...(message.payload ?? {}) };
-      await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: updatedSettings });
+      const raw = message.payload ?? {};
+      // accept payload legacy (settings direct) or new ({ patch: { settings } })
+      const patch = (raw && (raw as any).patch && (raw as any).patch.settings) ? (raw as any).patch.settings : (raw as any).settings ?? raw;
+
+      if (!patch || typeof patch !== 'object') {
+        return { success: false, error: "Invalid STATE_PATCH payload" };
+      }
+
+      const { [STORAGE_KEYS.SETTINGS]: current } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+      const next = { ...(current ?? {}), ...(patch ?? {}) };
+
+      // Avoid writing identical settings which can cause UI echo loops
+      const currentJson = JSON.stringify(current ?? {});
+      const nextJson = JSON.stringify(next);
+      if (currentJson === nextJson) {
+        // nothing changed
+        return { success: true };
+      }
+
+      await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: next });
       await notifyIfNeeded();
       return { success: true };
     }
@@ -212,13 +241,19 @@ export async function handleMessage(
     case MESSAGE.SITE_CUSTOMIZATION_UPDATED: {
       const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } =
         await chrome.storage.local.get(STORAGE_KEYS.SITE_CUSTOMIZATIONS);
-      const updatedCustomizations = {
-        ...(siteCustomizations ?? {}),
-        ...(message.payload ?? {}),
-      };
-      await chrome.storage.local.set({
-        [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: updatedCustomizations,
-      });
+      // Payload may be either a map of domain->config or { domain, config }
+      const payload = message.payload as any;
+      let updatedCustomizations: Record<string, any> = { ...(siteCustomizations ?? {}) };
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        if (payload.domain && payload.config) {
+          // single entry
+          updatedCustomizations = { ...updatedCustomizations, [String(payload.domain)]: payload.config };
+        } else {
+          // assume a map of domain->config and merge
+          updatedCustomizations = { ...updatedCustomizations, ...payload };
+        }
+      }
+      await chrome.storage.local.set({ [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: updatedCustomizations });
       await notifyStateUpdate();
       return { success: true };
     }
@@ -245,7 +280,7 @@ export async function handleMessage(
       return { success: true };
     }
 
-    case "STATE_UPDATED": {
+    case MESSAGE.STATE_UPDATED: {
       // Não deve vir de clientes; logamos para visibilidade
       console.warn(
         "[v0] Received a 'STATE_UPDATED' message from a client, which should not happen."
