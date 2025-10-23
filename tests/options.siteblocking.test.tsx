@@ -1,23 +1,18 @@
-/// <reference types="vitest" />
-/// <reference types="@testing-library/jest-dom" />
-
 import React from 'react';
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import SiteBlockingView from '../src/options/views/SiteBlockingView';
-import * as ChromeMock from '../src/shared/chrome-mock'; // usa o chromeAPI do projeto
+import * as ChromeMock from '../src/shared/chrome-mock';
 
 describe('options/SiteBlockingView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
 
-    // storage.local.get — Promise-based no chromeAPI
+    // storage.local.get — retorna estado inicial
     vi.spyOn(ChromeMock.chromeAPI.storage.local, 'get').mockImplementation(
-      async (...args: any[]) => {
-        const keys = args[0] as string | string[] | Record<string, any> | undefined;
-
-        const mockData: Record<string, any> = {
+      async (keys?: string | string[] | Record<string, unknown>) => {
+        const mockData: Record<string, unknown> = {
           blacklist: ['facebook.com', 'twitter.com', 'youtube.com'],
           siteCustomizations: {},
           timeLimits: [],
@@ -26,82 +21,48 @@ describe('options/SiteBlockingView', () => {
 
         if (typeof keys === 'string') {
           return { [keys]: mockData[keys] };
-        } else if (Array.isArray(keys)) {
-          const out: Record<string, any> = {};
-          keys.forEach((k) => (out[k] = mockData[k]));
+        }
+        if (Array.isArray(keys)) {
+          const out: Record<string, unknown> = {};
+          for (const k of keys) out[k] = mockData[k];
           return out;
-        } else if (keys && typeof keys === 'object') {
-          const out: Record<string, any> = {};
-          Object.keys(keys).forEach((k) => (out[k] = mockData[k] ?? (keys as any)[k]));
+        }
+        if (keys && typeof keys === 'object') {
+          const out: Record<string, unknown> = {};
+          for (const k of Object.keys(keys)) {
+            out[k] = mockData[k] ?? (keys as Record<string, unknown>)[k];
+          }
           return out;
         }
         return mockData;
       }
     );
 
-    // storage.local.set — Promise-based no chromeAPI
-    vi.spyOn(ChromeMock.chromeAPI.storage.local, 'set').mockImplementation(
-      async (..._args: any[]) => {
-        // noop — apenas para observar chamada
-      }
-    );
+    // storage.local.set — NÃO deve ser chamado para blacklist pelo componente
+    vi.spyOn(ChromeMock.chromeAPI.storage.local, 'set').mockResolvedValue();
 
-    // runtime.sendMessage — Promise-based no chromeAPI
+    // runtime.sendMessage — componente deve enviar ADD_TO_BLACKLIST
     vi.spyOn(ChromeMock.chromeAPI.runtime, 'sendMessage').mockImplementation(
-      async (...args: any[]) => {
-        const msg = args[0];
-        if (msg?.type === 'GET_INITIAL_STATE') {
-          return {
-            blacklist: ['facebook.com', 'twitter.com', 'youtube.com'],
-            timeLimits: [],
-            dailyUsage: {},
-            pomodoro: {
-              state: 'IDLE',
-              timeRemaining: 0,
-              currentCycle: 0,
-              config: {
-                focusMinutes: 25,
-                breakMinutes: 5,
-                longBreakMinutes: 15,
-                cyclesBeforeLongBreak: 4,
-                adaptiveMode: false,
-              },
-            },
-            siteCustomizations: {},
-            settings: {
-              notificationsEnabled: true,
-              productiveKeywords: [],
-              distractingKeywords: [],
-              analyticsConsent: false,
-            },
-          };
-        }
-        return { success: true };
+      async (_msg: unknown) => {
+        return { ok: true };
       }
     );
   });
 
-  it('adiciona domínio e chama storage.local.set e runtime.sendMessage', async () => {
-    const localSetSpy = vi.spyOn(ChromeMock.chromeAPI.storage.local, 'set');
+  it('adiciona domínio: envia mensagem ao SW e atualiza UI de forma otimista', async () => {
     const sendSpy = vi.spyOn(ChromeMock.chromeAPI.runtime, 'sendMessage');
 
     render(<SiteBlockingView />);
 
+    // Encontra o input e adiciona um novo domínio
     const input = await screen.findByPlaceholderText('exemplo.com');
-
     await act(async () => {
       fireEvent.change(input, { target: { value: 'example.com' } });
-      const addBtn = screen.getByRole('button', { name: /Adicionar/i });
-      fireEvent.click(addBtn);
+      fireEvent.click(screen.getByRole('button', { name: /Adicionar/i }));
     });
 
-    // Espera os efeitos assíncronos (persistência + mensagem)
+    // 1) Verifica se a mensagem foi enviada ao SW
     await waitFor(() => {
-      expect(localSetSpy).toHaveBeenCalled();
-    });
-
-    await waitFor(() => {
-      // A view manda UMA mensagem sem callback (Promise-based)
       expect(sendSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'ADD_TO_BLACKLIST',
@@ -110,7 +71,7 @@ describe('options/SiteBlockingView', () => {
       );
     });
 
-    // sanity check: domínio renderizado
+    // 2) Verifica se a UI foi atualizada otimisticamente
     expect(screen.getByText('example.com')).toBeInTheDocument();
   });
 });

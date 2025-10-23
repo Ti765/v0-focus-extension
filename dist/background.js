@@ -371,46 +371,47 @@ chrome.runtime?.onConnect?.addListener && chrome.runtime.onConnect.addListener((
   }
 });
 async function oe(e, t) {
+  const o = e.skipNotify === !0, a = () => !o && l();
   switch (e.type) {
     case "GET_INITIAL_STATE":
       return await L();
     case "ADD_TO_BLACKLIST":
-      return await K(e.payload?.domain), { success: !0 };
+      return await K(e.payload?.domain), await a(), { success: !0 };
     case "REMOVE_FROM_BLACKLIST":
-      return await ie(e.payload?.domain), { success: !0 };
+      return await ie(e.payload?.domain), await a(), { success: !0 };
     case "START_POMODORO":
       return await ce(e.payload), { success: !0 };
     case "STOP_POMODORO":
       return await le(), { success: !0 };
     case "SET_TIME_LIMIT":
-      return await Q(e.payload?.domain, e.payload?.limitMinutes), { success: !0 };
+      return await Q(e.payload?.domain, e.payload?.limitMinutes), await a(), { success: !0 };
     case "CONTENT_ANALYSIS_RESULT":
-      return await te(e.payload), { success: !0 };
+      return await te(e.payload), await a(), { success: !0 };
     case "UPDATE_SETTINGS": {
-      const { [n.SETTINGS]: o } = await chrome.storage.sync.get(n.SETTINGS), a = { ...o ?? {}, ...e.payload ?? {} };
-      return await chrome.storage.sync.set({ [n.SETTINGS]: a }), await l(), { success: !0 };
+      const { [n.SETTINGS]: i } = await chrome.storage.sync.get(n.SETTINGS), s = { ...i ?? {}, ...e.payload ?? {} };
+      return await chrome.storage.sync.set({ [n.SETTINGS]: s }), await a(), { success: !0 };
     }
     case "SITE_CUSTOMIZATION_UPDATED": {
-      const { [n.SITE_CUSTOMIZATIONS]: o } = await chrome.storage.local.get(n.SITE_CUSTOMIZATIONS), a = {
-        ...o ?? {},
+      const { [n.SITE_CUSTOMIZATIONS]: i } = await chrome.storage.local.get(n.SITE_CUSTOMIZATIONS), s = {
+        ...i ?? {},
         ...e.payload ?? {}
       };
       return await chrome.storage.local.set({
-        [n.SITE_CUSTOMIZATIONS]: a
+        [n.SITE_CUSTOMIZATIONS]: s
       }), await l(), { success: !0 };
     }
     case "TOGGLE_ZEN_MODE": {
-      const [o] = await chrome.tabs.query({ active: !0, currentWindow: !0 });
-      if (o?.id)
+      const [i] = await chrome.tabs.query({ active: !0, currentWindow: !0 });
+      if (i?.id)
         try {
-          await chrome.tabs.sendMessage(o.id, {
+          await chrome.tabs.sendMessage(i.id, {
             type: "TOGGLE_ZEN_MODE",
             payload: e.payload
           });
-        } catch (a) {
+        } catch (s) {
           console.warn(
-            `[v0] Could not send TOGGLE_ZEN_MODE to tab ${o.id}. It may be a protected page or the content script wasn't injected.`,
-            a
+            `[v0] Could not send TOGGLE_ZEN_MODE to tab ${i.id}. It may be a protected page or the content script wasn't injected.`,
+            s
           );
         }
       return { success: !0 };
@@ -420,8 +421,8 @@ async function oe(e, t) {
         "[v0] Received a 'STATE_UPDATED' message from a client, which should not happen."
       ), { success: !1, error: "Invalid message type received." };
     default: {
-      const o = e.type;
-      throw new Error(`Unknown message type: ${o}`);
+      const i = e.type;
+      throw new Error(`Unknown message type: ${i}`);
     }
   }
 }

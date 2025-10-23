@@ -23,10 +23,29 @@ const generateMockDailyUsage = () => {
   return usage
 }
 
+export const createStorageChangeListener = () => {
+  const listeners = new Set<(changes: any, areaName: string) => void>();
+  return {
+    addListener: (callback: (changes: any, areaName: string) => void) => {
+      listeners.add(callback);
+    },
+    removeListener: (callback: (changes: any, areaName: string) => void) => {
+      listeners.delete(callback);
+    },
+    hasListener: (callback: (changes: any, areaName: string) => void) => {
+      return listeners.has(callback);
+    },
+    emit: (changes: any, areaName: string) => {
+      listeners.forEach(listener => listener(changes, areaName));
+    }
+  };
+};
+
 export const chromeAPI = isChromeExtension
   ? chrome
   : {
       runtime: {
+        onMessage: createStorageChangeListener(),
         sendMessage: async (message: any) => {
           console.log("[v0] Mock chrome.runtime.sendMessage:", message)
           return {
@@ -60,6 +79,7 @@ export const chromeAPI = isChromeExtension
       },
       storage: {
         local: {
+          onChanged: createStorageChangeListener(),
           get: async (keys?: string | string[] | Record<string, any>) => {
             console.log("[v0] Mock chrome.storage.local.get:", keys)
             // Return mock data based on requested keys
@@ -94,6 +114,7 @@ export const chromeAPI = isChromeExtension
           },
         },
         sync: {
+          onChanged: createStorageChangeListener(),
           get: async (keys?: string | string[] | Record<string, any>) => {
             console.log("[v0] Mock chrome.storage.sync.get:", keys)
             const mockData: Record<string, any> = {

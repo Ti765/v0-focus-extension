@@ -142,9 +142,12 @@ if (chrome.runtime?.onConnect?.addListener) {
 
 /** Roteador central de mensagens oriundas do popup/options/content */
 export async function handleMessage(
-  message: Message,
+  message: Message & { skipNotify?: boolean },
   _sender: chrome.runtime.MessageSender
 ): Promise<any> {
+  const skipNotify = message.skipNotify === true;
+  const notifyIfNeeded = () => !skipNotify && notifyStateUpdate();
+
   switch (message.type) {
     case "GET_INITIAL_STATE": {
       return await getAppState();
@@ -152,11 +155,13 @@ export async function handleMessage(
 
     case "ADD_TO_BLACKLIST": {
       await addToBlacklist(message.payload?.domain);
+      await notifyIfNeeded();
       return { success: true };
     }
 
     case "REMOVE_FROM_BLACKLIST": {
       await removeFromBlacklist(message.payload?.domain);
+      await notifyIfNeeded();
       return { success: true };
     }
 
@@ -172,11 +177,13 @@ export async function handleMessage(
 
     case "SET_TIME_LIMIT": {
       await setTimeLimit(message.payload?.domain, message.payload?.limitMinutes);
+      await notifyIfNeeded();
       return { success: true };
     }
 
     case "CONTENT_ANALYSIS_RESULT": {
       await handleContentAnalysisResult(message.payload);
+      await notifyIfNeeded();
       return { success: true };
     }
 
@@ -185,7 +192,7 @@ export async function handleMessage(
         await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
       const updatedSettings = { ...(settings ?? {}), ...(message.payload ?? {}) };
       await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: updatedSettings });
-      await notifyStateUpdate();
+      await notifyIfNeeded();
       return { success: true };
     }
 

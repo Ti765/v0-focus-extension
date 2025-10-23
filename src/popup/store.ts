@@ -91,35 +91,72 @@ export const useStore = create<PopupStore>((set) => ({
     // ensure we have a registration counter and handler slot
     if (!globalAny.__v0_store_listener_count) globalAny.__v0_store_listener_count = 0;
 
-    // If no handler registered yet, create and register one
+    // If a handler exists but (for some reason) isn't currently registered with
+    // chrome.runtime.onMessage, re-register it. Otherwise create+register a
+    // fresh handler. This guards against a stale global flag where the
+    // reference exists but was removed elsewhere.
+    if (globalAny.__v0_store_listener) {
+      try {
+        const hasFn = typeof chrome.runtime.onMessage.hasListener === "function";
+        const isRegistered = hasFn ? chrome.runtime.onMessage.hasListener(globalAny.__v0_store_listener) : true;
+        if (!isRegistered) {
+          chrome.runtime.onMessage.addListener(globalAny.__v0_store_listener);
+        }
+      } catch (e) {
+        // defensive: if hasListener/addListener misbehaves, fall back to
+        // creating a new handler below by clearing the slot.
+        globalAny.__v0_store_listener = undefined;
+      }
+    }
+
     if (!globalAny.__v0_store_listener) {
+      // Flag para evitar re-emissão de mensagens durante processamento de STATE_UPDATED
+      let isHandlingUpdate = false;
+
       const handler = (msg: Message) => {
         if (msg?.type === "STATE_UPDATED" && msg.payload) {
+          // Se já estiver processando um update, ignora para evitar loops
+          if (isHandlingUpdate) {
+            console.debug('[v0][Store] Ignoring nested STATE_UPDATED while already handling update');
+            return;
+          }
+
           const incoming = msg.payload as AppState;
           // Dedupe: only set if payload differs from current store
-          set((curr) => {
-            if (
-              deepEqual(
-                {
-                  blacklist: curr.blacklist,
-                  timeLimits: curr.timeLimits,
-                  dailyUsage: curr.dailyUsage,
-                  pomodoro: curr.pomodoro,
-                  siteCustomizations: curr.siteCustomizations,
-                  settings: curr.settings,
-                },
-                incoming
-              )
-            ) {
-              return curr as any; // real no-op, avoid triggering rerender
-            }
-            return { ...(incoming as AppState), isLoading: false, error: null } as any;
-          });
+          try {
+            isHandlingUpdate = true;
+            set((curr) => {
+              if (
+                deepEqual(
+                  {
+                    blacklist: curr.blacklist,
+                    timeLimits: curr.timeLimits,
+                    dailyUsage: curr.dailyUsage,
+                    pomodoro: curr.pomodoro,
+                    siteCustomizations: curr.siteCustomizations,
+                    settings: curr.settings,
+                  },
+                  incoming
+                )
+              ) {
+                return curr as any; // real no-op, avoid triggering rerender
+              }
+              return { ...(incoming as AppState), isLoading: false, error: null } as any;
+            });
+          } finally {
+            isHandlingUpdate = false;
+          }
         }
       };
 
-      chrome.runtime.onMessage.addListener(handler);
-      globalAny.__v0_store_listener = handler;
+      try {
+        chrome.runtime.onMessage.addListener(handler);
+        globalAny.__v0_store_listener = handler;
+      } catch (e) {
+        // If registration fails for any reason, ensure we don't keep a broken ref
+        globalAny.__v0_store_listener = undefined;
+        throw e;
+      }
     }
 
     // increment subscriber count and return an unsubscribe that decrements it
@@ -129,11 +166,15 @@ export const useStore = create<PopupStore>((set) => ({
       if (unsubscribed) return;
       unsubscribed = true;
       try {
-        globalAny.__v0_store_listener_count--;
-        if (globalAny.__v0_store_listener_count <= 0) {
-          // remove the handler and clear global slots
+        // decrement but never below zero
+        globalAny.__v0_store_listener_count = Math.max(0, (globalAny.__v0_store_listener_count || 1) - 1);
+        if (globalAny.__v0_store_listener_count === 0) {
+          // try removeListener defensively and always clear global slots so
+          // future mounts can re-register cleanly
           try {
-            chrome.runtime.onMessage.removeListener(globalAny.__v0_store_listener);
+            if (globalAny.__v0_store_listener && typeof chrome.runtime.onMessage.removeListener === "function") {
+              chrome.runtime.onMessage.removeListener(globalAny.__v0_store_listener);
+            }
           } catch {}
           globalAny.__v0_store_listener = undefined;
           globalAny.__v0_store_listener_count = 0;
