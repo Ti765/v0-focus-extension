@@ -3,9 +3,9 @@ import type { TimeLimitEntry } from "../../shared/types";
 import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
 import { normalizeDomain, extractDomain } from "../../shared/url";
 import { createDomainRegexPattern } from "../../shared/regex-utils";
+import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
 
-// Flag de debug para logs detalhados do DNR e tracking
-const DEBUG_DNR = true;
+// Flag de debug para logs detalhados do tracking (separate from DNR)
 const DEBUG_TRACKING = true;
 
 // --- Estado interno ---
@@ -88,6 +88,8 @@ export async function initializeUsageTracker() {
   usageInitialized = true;
 
   console.log("[v0] Initializing usage tracker module");
+  // Initialize debug configuration cache
+  await updateDebugConfigCache();
 
   // agenda o batimento do tracker
   await chrome.alarms.clear(ALARM_NAMES.USAGE_TRACKER);
@@ -217,9 +219,15 @@ async function recordActiveTabUsage() {
   }
 
   const today = new Date().toISOString().split("T")[0];
-  const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(
+  const { [STORAGE_KEYS.DAILY_USAGE]: existingUsage = {} } = await chrome.storage.local.get(
     STORAGE_KEYS.DAILY_USAGE
   );
+  
+  // Garante que temos uma estrutura para o dia atual
+  const dailyUsage = {
+    ...existingUsage,
+    [today]: existingUsage[today] || {}
+  };
 
   if (!dailyUsage[today]) {
     dailyUsage[today] = {};
@@ -238,9 +246,10 @@ async function recordActiveTabUsage() {
 
 // ---- Verifica limite e aplica regra de sessão se excedido ----
 async function checkTimeLimit(domain: string, totalSecondsToday: number) {
-  const { [STORAGE_KEYS.TIME_LIMITS]: timeLimits = [] } = await chrome.storage.local.get(
+  const { [STORAGE_KEYS.TIME_LIMITS]: existingLimits } = await chrome.storage.local.get(
     STORAGE_KEYS.TIME_LIMITS
   );
+  const timeLimits = Array.isArray(existingLimits) ? existingLimits : [];
   const limit = (timeLimits as TimeLimitEntry[]).find((e) => e.domain === domain);
   if (!limit) return;
 
@@ -249,7 +258,7 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
   if (totalSecondsToday >= limitSeconds) {
     const ruleId = generateLimitRuleId(domain);
 
-      try {
+    try {
         if (DEBUG_TRACKING) {
           console.log("[TRACKING-DEBUG] Time limit check:", {
             domain,
@@ -272,7 +281,8 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           },
         };
         
-        if (DEBUG_DNR) {
+        const debugEnabled = await isDNRDebugEnabled();
+        if (debugEnabled) {
           console.log("[DNR-DEBUG] Time limit session rule to add:", {
             id: rule.id,
             regex: rule.condition.regexFilter,
@@ -287,7 +297,7 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           addRules: [rule],
         });
         
-        if (DEBUG_DNR) {
+        if (debugEnabled) {
           const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
           console.log("[DNR-DEBUG] All session rules after time limit:", sessionRules);
           console.log("[DNR-DEBUG] Session rules by domain:", sessionRules.map(r => ({

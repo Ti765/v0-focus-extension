@@ -26,10 +26,39 @@ export function normalizeDomain(domainOrUrl: string): string {
 export function extractDomain(urlOrDomain: string): string {
   if (!urlOrDomain) return "";
   try {
-    const url = new URL(urlOrDomain);
-    return url.hostname.replace(/^www\./, "");
+    const url = new URL(urlOrDomain.startsWith('http') ? urlOrDomain : `https://${urlOrDomain}`);
+    const hostname = url.hostname.replace(/^www\./, "");
+    
+    // Extrai o domínio principal (últimos 2 ou 3 segmentos)
+    const parts = hostname.split('.');
+    
+    // Casos especiais como .co.uk, .com.br, etc.
+    const specialTlds = ['co.uk', 'co.jp', 'com.br', 'com.au', 'co.nz'];
+    for (const tld of specialTlds) {
+      if (hostname.endsWith(`.${tld}`)) {
+        const segments = hostname.split('.');
+        return segments.slice(-3).join('.');
+      }
+    }
+    
+    // Caso padrão: pega os últimos 2 segmentos (domínio principal)
+    // Para subdomínios como "subdomain.demo.com", retorna "demo.com"
+    return parts.slice(-2).join('.');
   } catch {
-    // Se não for uma URL válida, normaliza como domínio
-    return normalizeDomain(urlOrDomain);
+    // Se não for uma URL válida, tenta extrair o domínio principal
+    const domain = urlOrDomain.replace(/^www\./, "").split('/')[0];
+    const parts = domain.split('.');
+    
+    // Casos especiais
+    const specialTlds = ['co.uk', 'co.jp', 'com.br', 'com.au', 'co.nz'];
+    for (const tld of specialTlds) {
+      if (domain.endsWith(`.${tld}`)) {
+        const segments = domain.split('.');
+        return segments.slice(-3).join('.');
+      }
+    }
+    
+    // Caso padrão: pega os últimos 2 segmentos (domínio principal)
+    return parts.slice(-2).join('.');
   }
 }

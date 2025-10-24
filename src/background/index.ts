@@ -5,6 +5,7 @@ import { initializePomodoro } from "./modules/pomodoro";
 import {
   initializeBlocker,
   addToBlacklist,
+  cleanupAllDNRRules,
 } from "./modules/blocker";
 import {
   initializeUsageTracker,
@@ -12,7 +13,7 @@ import {
 } from "./modules/usage-tracker";
 import { initializeContentAnalyzer } from "./modules/content-analyzer";
 import { initializeFirebaseSync } from "./modules/firebase-sync";
-import { handleMessage } from "./modules/message-handler";
+import { handleMessage, notifyStateUpdate } from "./modules/message-handler";
 import {
   STORAGE_KEYS,
   DEFAULT_SETTINGS,
@@ -119,15 +120,29 @@ async function injectContentScriptIntoAllTabs() {
 }
 
 /** onInstalled: cria estado inicial e injeta CS em abas existentes */
-chrome.runtime.onInstalled.addListener(async (details) => {
+function handleInstalled(details: chrome.runtime.InstalledDetails) {
   console.log("[v0] Extension installed/updated:", details.reason);
+  return initializeExtension(details);
+}
+
+async function initializeExtension(details: chrome.runtime.InstalledDetails) {
+  console.log("[v0] Extension installed/updated:", details.reason);
+
+  // CLEANUP OLD RULES FIRST - prevents orphaned rules from interfering
+  try {
+    await cleanupAllDNRRules();
+  } catch (e) {
+    console.error("[v0] Failed to cleanup DNR rules:", e);
+  }
 
   if (details.reason === "install") {
     // Estado inicial completo
-    const initialState: Partial<AppState> = {
-      blacklist: [],
-      timeLimits: [],
-      dailyUsage: {},
+    const initialState: AppState = {
+      blacklist: [], // Garantir que é array
+      timeLimits: [], // Garantir que é array
+      dailyUsage: {
+        [new Date().toISOString().split('T')[0]]: {} // Inicializar com data atual
+      },
       siteCustomizations: {},
       settings: DEFAULT_SETTINGS,
     };
@@ -168,17 +183,40 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
   // Inicializa módulos em ambos os casos
   await bootstrap();
-});
+}
+
+// Expose debug functions globally for console testing
+(globalThis as any).debugDNR = async () => {
+  const { debugDNRStatus } = await import("./modules/blocker");
+  await debugDNRStatus();
+};
+
+(globalThis as any).cleanupDNR = async () => {
+  const { cleanupAllDNRRules } = await import("./modules/blocker");
+  await cleanupAllDNRRules();
+};
 
 /** onStartup: re-inicializa módulos (navegador aberto) */
-chrome.runtime.onStartup.addListener(async () => {
+function handleStartup() {
   console.log("[v0] Extension started on browser startup");
-  await bootstrap();
-});
+  return bootstrap();
+}
 
-/** Hub de mensagens */
-chrome.runtime.onMessage.addListener(
-  (message: any, sender: chrome.runtime.MessageSender, sendResponse) => {
+
+// Registra os listeners ao carregar
+function initializeListeners() {
+  // Registra os listeners principais
+  chrome.runtime.onInstalled.addListener(handleInstalled);
+  chrome.runtime.onStartup.addListener(handleStartup);
+  
+  // Storage change listener
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    console.log(`[v0] Storage changed in ${areaName}:`, changes);
+    notifyStateUpdate(); // Notifica UI sobre mudanças
+  });
+
+  // Message listener
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       console.log("[v0] Message received:", message?.type, message?.payload);
 
@@ -196,12 +234,10 @@ chrome.runtime.onMessage.addListener(
       sendResponse({ error: (e as Error).message });
       return false;
     }
-  }
-);
+  });
 
-/** Botões de notificação (sugestão de bloqueio) */
-chrome.notifications.onButtonClicked.addListener(
-  async (notificationId, buttonIndex) => {
+  // Notification button listener
+  chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIndex) => {
     try {
       console.log("[v0] Notification button clicked:", notificationId, buttonIndex);
 
@@ -217,7 +253,10 @@ chrome.notifications.onButtonClicked.addListener(
       // Sempre limpa a notificação
       chrome.notifications.clear(notificationId);
     }
-  }
-);
+  });
+}
+
+// Inicializa os listeners
+initializeListeners();
 
 console.log("[v0] Service Worker loaded and listeners attached.");

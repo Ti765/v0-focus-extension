@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   syncWithCloud: false,
   language: "pt-BR",
   telemetry: false,
+  debugDNR: false, // Default to false for production
   productiveKeywords: [
     "tutorial", "documentation", "study", "learn", "course",
     "education", "research", "guide", "reference", "manual",

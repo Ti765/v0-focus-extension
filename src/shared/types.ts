@@ -104,6 +104,7 @@ export interface UserSettings {
   syncWithCloud: boolean;
   timezone?: string;
   telemetry?: boolean;
+  debugDNR?: boolean; // Debug flag for DNR (Declarative Net Request) operations
   // Backward compatibility - UI currently references these in places
   analyticsConsent?: boolean;
   notificationsEnabled?: boolean;

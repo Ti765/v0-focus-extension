@@ -3,9 +3,7 @@ import type { BlacklistEntry, Domain } from "../../shared/types";
 import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain } from "../../shared/url";
 import { createDomainRegexPattern } from "../../shared/regex-utils";
-
-// Flag de debug para logs detalhados do DNR
-const DEBUG_DNR = true;
+import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
 
 const POMODORO_RULE_ID_START = 1000;
 const USER_BLACKLIST_RULE_ID_START = 2000;
@@ -35,7 +33,86 @@ function generateRuleIdForDomain(domain: string): number {
 
 export async function initializeBlocker() {
   console.log("[v0] Initializing blocker module");
+  // Initialize debug configuration cache
+  await updateDebugConfigCache();
   await syncUserBlacklistRules();
+}
+
+/**
+ * Removes ALL dynamic and session DNR rules.
+ * Used for cleanup on extension install/update.
+ */
+export async function cleanupAllDNRRules(): Promise<void> {
+  console.log("[v0] Cleaning up all DNR rules...");
+  
+  try {
+    // Clean dynamic rules
+    const dynamicRules = await chrome.declarativeNetRequest.getDynamicRules();
+    if (dynamicRules.length > 0) {
+      const dynamicIds = dynamicRules.map(r => r.id);
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: dynamicIds
+      });
+      console.log(`[v0] Removed ${dynamicIds.length} dynamic rules:`, dynamicIds);
+    }
+    
+    // Clean session rules
+    const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
+    if (sessionRules.length > 0) {
+      const sessionIds = sessionRules.map(r => r.id);
+      await chrome.declarativeNetRequest.updateSessionRules({
+        removeRuleIds: sessionIds
+      });
+      console.log(`[v0] Removed ${sessionIds.length} session rules:`, sessionIds);
+    }
+    
+    console.log("[v0] DNR cleanup complete");
+  } catch (error) {
+    console.error("[v0] Error during DNR cleanup:", error);
+  }
+}
+
+/**
+ * Logs comprehensive DNR rule status for debugging
+ */
+export async function debugDNRStatus(): Promise<void> {
+  console.log("=== DNR DEBUG STATUS ===");
+  
+  try {
+    const dynamic = await chrome.declarativeNetRequest.getDynamicRules();
+    const session = await chrome.declarativeNetRequest.getSessionRules();
+    
+    console.log(`Dynamic rules: ${dynamic.length}`);
+    dynamic.forEach(rule => {
+      console.log(`  [${rule.id}] priority=${rule.priority} action=${rule.action.type}`);
+      console.log(`    regex: ${rule.condition.regexFilter}`);
+    });
+    
+    console.log(`Session rules: ${session.length}`);
+    session.forEach(rule => {
+      console.log(`  [${rule.id}] priority=${rule.priority} action=${rule.action.type}`);
+      console.log(`    regex: ${rule.condition.regexFilter}`);
+    });
+    
+    // Test the regex against common URLs
+    if (dynamic.length > 0 && dynamic[0].condition.regexFilter) {
+      const regex = new RegExp(dynamic[0].condition.regexFilter);
+      const testUrls = [
+        "https://youtube.com",
+        "https://youtube.com/",
+        "https://www.youtube.com",
+        "https://www.youtube.com/watch?v=test"
+      ];
+      console.log("Regex test results:");
+      testUrls.forEach(url => {
+        console.log(`  ${regex.test(url) ? "✅" : "❌"} ${url}`);
+      });
+    }
+  } catch (error) {
+    console.error("DNR debug failed:", error);
+  }
+  
+  console.log("=== END DNR DEBUG ===");
 }
 
 export async function addToBlacklist(domain: string) {
@@ -169,6 +246,7 @@ async function syncUserBlacklistRules() {
       if (!existingUserRuleIds.has(id)) {
         // Usa regexFilter para casar tanto domínio raiz quanto subdomínios em http/https
         const regex = createDomainRegexPattern(d);
+        console.log('[v0] [DEBUG] Regex pattern for', d, ':', regex);
         rulesToAdd.push({
           id,
           priority: 1,
@@ -190,7 +268,8 @@ async function syncUserBlacklistRules() {
     );
 
     if (rulesToAdd.length > 0 || rulesToRemove.length > 0) {
-      if (DEBUG_DNR) {
+      const debugEnabled = await isDNRDebugEnabled();
+      if (debugEnabled) {
         console.log("[DNR-DEBUG] Blacklist domains:", blacklist.map((e: any) => e.domain));
         console.log("[DNR-DEBUG] Rules to add (with regex):", rulesToAdd.map(r => ({
           id: r.id,
@@ -205,7 +284,7 @@ async function syncUserBlacklistRules() {
         addRules: rulesToAdd,
       });
       
-      if (DEBUG_DNR) {
+      if (debugEnabled) {
         const allRules = await chrome.declarativeNetRequest.getDynamicRules();
         console.log("[DNR-DEBUG] All dynamic rules after sync:", allRules);
         console.log("[DNR-DEBUG] Total rules count:", allRules.length);
