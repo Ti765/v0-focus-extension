@@ -2,7 +2,7 @@ import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/
 import type { TimeLimitEntry } from "../../shared/types";
 import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
 import { normalizeDomain, extractDomain } from "../../shared/url";
-import { createDomainRegexPattern } from "../../shared/regex-utils";
+import { createDomainUrlFilter } from "../../shared/regex-utils";
 import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
 
 // Flag de debug para logs detalhados do tracking (separate from DNR)
@@ -269,14 +269,19 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           });
         }
 
-        const regex = createDomainRegexPattern(domain);
+        const urlFilter = createDomainUrlFilter(domain);
+        const blockedPageUrl = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(domain)}`);
         const rule = {
           id: ruleId,
           priority: 3,
-          action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
+          action: { 
+            type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
+            redirect: {
+              url: blockedPageUrl
+            }
+          },
           condition: {
-            regexFilter: regex,
-            isUrlFilterCaseSensitive: false,
+            urlFilter: urlFilter,
             resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
           },
         };
@@ -285,7 +290,7 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
         if (debugEnabled) {
           console.log("[DNR-DEBUG] Time limit session rule to add:", {
             id: rule.id,
-            regex: rule.condition.regexFilter,
+            urlFilter: rule.condition.urlFilter,
             domain,
             totalSecondsToday,
             limitSeconds
@@ -302,7 +307,7 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           console.log("[DNR-DEBUG] All session rules after time limit:", sessionRules);
           console.log("[DNR-DEBUG] Session rules by domain:", sessionRules.map(r => ({
             id: r.id,
-            regex: r.condition.regexFilter
+            urlFilter: r.condition.urlFilter || r.condition.regexFilter
           })));
         }
 

@@ -2,12 +2,13 @@ import { STORAGE_KEYS } from "../../shared/constants";
 import type { BlacklistEntry, Domain } from "../../shared/types";
 import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain } from "../../shared/url";
-import { createDomainRegexPattern, validateDNRRegex } from "../../shared/regex-utils";
+import { createDomainUrlFilter } from "../../shared/regex-utils";
 import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
 
 const POMODORO_RULE_ID_START = 1000;
 const USER_BLACKLIST_RULE_ID_START = 2000;
 const USER_BLACKLIST_RANGE = 1000; // IDs 2000..2999 reservados para a blacklist do usuário
+const CACHE_RULE_ID_OFFSET = 10000; // Offset para regras de modificação de cache
 
 // ---- Util: fila simples para evitar corridas no DNR ----
 let dnrQueue: Promise<any> = Promise.resolve();
@@ -85,13 +86,13 @@ export async function debugDNRStatus(): Promise<void> {
     console.log(`Dynamic rules: ${dynamic.length}`);
     dynamic.forEach(rule => {
       console.log(`  [${rule.id}] priority=${rule.priority} action=${rule.action.type}`);
-      console.log(`    regex: ${rule.condition.regexFilter}`);
+      console.log(`    urlFilter: ${rule.condition.urlFilter || rule.condition.regexFilter}`);
     });
     
     console.log(`Session rules: ${session.length}`);
     session.forEach(rule => {
       console.log(`  [${rule.id}] priority=${rule.priority} action=${rule.action.type}`);
-      console.log(`    regex: ${rule.condition.regexFilter}`);
+      console.log(`    urlFilter: ${rule.condition.urlFilter || rule.condition.regexFilter}`);
     });
     
     // Test the regex against common URLs
@@ -200,14 +201,16 @@ async function syncUserBlacklistRules() {
     const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
     console.log("[v0] DEBUG: Found", existingRules.length, "existing DNR rules");
 
-    // IDs já usados pela blacklist do usuário
+    // IDs já usados pela blacklist do usuário (incluindo regras de cache)
     const existingUserRuleIds = new Set(
       existingRules
         .map((r) => r.id)
         .filter(
           (id) =>
-            id >= USER_BLACKLIST_RULE_ID_START &&
-            id < USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE
+            (id >= USER_BLACKLIST_RULE_ID_START &&
+            id < USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE) ||
+            (id >= USER_BLACKLIST_RULE_ID_START + CACHE_RULE_ID_OFFSET &&
+            id < USER_BLACKLIST_RULE_ID_START + CACHE_RULE_ID_OFFSET + USER_BLACKLIST_RANGE)
         )
     );
 
@@ -250,34 +253,56 @@ async function syncUserBlacklistRules() {
 
       // Adiciona a regra se esse ID ainda não existe atualmente
       if (!existingUserRuleIds.has(id)) {
-        // Usa regexFilter para casar tanto domínio raiz quanto subdomínios em http/https
-        const regex = createDomainRegexPattern(d);
-        const validation = validateDNRRegex(regex);
+        // Usa urlFilter para casar tanto domínio raiz quanto subdomínios
+        const urlFilter = createDomainUrlFilter(d);
+        console.log('[v0] [DEBUG] Valid urlFilter for', d, ':', urlFilter);
         
-        if (!validation.valid) {
-          console.error(`[v0] Invalid DNR regex for ${d}:`, validation.error);
-          continue; // Skip this domain
-        }
-        
-        console.log('[v0] [DEBUG] Valid regex pattern for', d, ':', regex);
+        // Regra 1: Redirecionar para página de bloqueio
+        const blockedPageUrl = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(d)}`);
         rulesToAdd.push({
           id,
           priority: 1,
           action: {
-            type: chrome.declarativeNetRequest.RuleActionType.BLOCK,
+            type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
+            redirect: {
+              url: blockedPageUrl
+            }
           },
           condition: {
-            regexFilter: regex,
-            isUrlFilterCaseSensitive: false,
+            urlFilter: urlFilter,
             resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
           },
         });
+        
+        // Regra 2: Modificar headers para evitar cache (ID offset +10000)
+        const cacheRuleId = id + CACHE_RULE_ID_OFFSET;
+        if (!existingUserRuleIds.has(cacheRuleId)) {
+          rulesToAdd.push({
+            id: cacheRuleId,
+            priority: 1,
+            action: {
+              type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
+              responseHeaders: [
+                { header: 'cache-control', operation: 'set', value: 'no-store, no-cache, must-revalidate' },
+                { header: 'pragma', operation: 'set', value: 'no-cache' },
+                { header: 'expires', operation: 'set', value: '0' },
+              ],
+            },
+            condition: {
+              urlFilter: urlFilter,
+              resourceTypes: [
+                chrome.declarativeNetRequest.ResourceType.MAIN_FRAME,
+                chrome.declarativeNetRequest.ResourceType.SUB_FRAME,
+              ],
+            },
+          });
+        }
       }
     }
 
-    // Regras a remover: IDs do range 2000..2999 que não estão mais no conjunto final
+    // Regras a remover: IDs do range 2000..2999 e 12000..12999 que não estão mais no conjunto final
     const rulesToRemove = Array.from(existingUserRuleIds).filter(
-      (id) => !finalRuleIds.has(id)
+      (id) => !finalRuleIds.has(id) && !finalRuleIds.has(id - CACHE_RULE_ID_OFFSET)
     );
 
     console.log("[v0] DEBUG: Rules to add:", rulesToAdd.length);
@@ -360,38 +385,75 @@ export async function enablePomodoroBlocking() {
     return;
   }
 
-  const pomodoroRules: chrome.declarativeNetRequest.Rule[] = (blacklist as BlacklistEntry[]).map(
-    (entry, index) => {
-      const d = normalizeDomain(entry.domain);
-      const regex = createDomainRegexPattern(d);
-      return {
-        id: POMODORO_RULE_ID_START + index, // sequência simples e previsível
-        priority: 2, // acima das regras de usuário
-        action: {
-          type: chrome.declarativeNetRequest.RuleActionType.BLOCK,
-        },
-        condition: {
-          // Bloqueia navegações para o domínio (e subdomínios)
-          regexFilter: regex,
-          isUrlFilterCaseSensitive: false,
-          resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-        },
-      } as chrome.declarativeNetRequest.Rule;
-    }
-  );
+  const pomodoroRules: chrome.declarativeNetRequest.Rule[] = [];
+  
+  // Criar regras de bloqueio e cache para cada domínio
+  (blacklist as BlacklistEntry[]).forEach((entry, index) => {
+    const d = normalizeDomain(entry.domain);
+    const urlFilter = createDomainUrlFilter(d);
+    
+    // Regra 1: Redirecionar para página de bloqueio
+    const blockedPageUrl = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(d)}`);
+    pomodoroRules.push({
+      id: POMODORO_RULE_ID_START + index,
+      priority: 2, // acima das regras de usuário
+      action: {
+        type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
+        redirect: {
+          url: blockedPageUrl
+        }
+      },
+      condition: {
+        urlFilter: urlFilter,
+        resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
+      },
+    } as chrome.declarativeNetRequest.Rule);
+    
+    // Regra 2: Modificar headers para evitar cache
+    pomodoroRules.push({
+      id: POMODORO_RULE_ID_START + index + CACHE_RULE_ID_OFFSET,
+      priority: 2,
+      action: {
+        type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
+        responseHeaders: [
+          { header: 'cache-control', operation: 'set', value: 'no-store, no-cache, must-revalidate' },
+          { header: 'pragma', operation: 'set', value: 'no-cache' },
+          { header: 'expires', operation: 'set', value: '0' },
+        ],
+      },
+      condition: {
+        urlFilter: urlFilter,
+        resourceTypes: [
+          chrome.declarativeNetRequest.ResourceType.MAIN_FRAME,
+          chrome.declarativeNetRequest.ResourceType.SUB_FRAME,
+        ],
+      },
+    } as chrome.declarativeNetRequest.Rule);
+  });
 
   return withDnrLock(async () => {
     const existing = await chrome.declarativeNetRequest.getDynamicRules();
     const oldPomodoroIds = existing
       .map((r) => r.id)
-      .filter((id) => id >= POMODORO_RULE_ID_START && id < USER_BLACKLIST_RULE_ID_START);
+      .filter((id) => 
+        (id >= POMODORO_RULE_ID_START && id < USER_BLACKLIST_RULE_ID_START) ||
+        (id >= POMODORO_RULE_ID_START + CACHE_RULE_ID_OFFSET && id < USER_BLACKLIST_RULE_ID_START + CACHE_RULE_ID_OFFSET)
+      );
 
     console.log("[v0] [DEBUG] Pomodoro rules to add:", JSON.stringify(pomodoroRules, null, 2));
     
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: oldPomodoroIds,
-      addRules: pomodoroRules,
-    });
+    try {
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: oldPomodoroIds,
+        addRules: pomodoroRules,
+      });
+      console.log("[v0] DEBUG: Pomodoro DNR rules successfully applied");
+    } catch (error) {
+      console.error("[v0] ERROR: Pomodoro DNR updateDynamicRules FAILED:", error);
+      console.error("[v0] ERROR: Failed Pomodoro rules:", pomodoroRules);
+      console.error("[v0] ERROR: Attempted to remove Pomodoro rules:", oldPomodoroIds);
+      throw error; // Re-throw to maintain existing error handling
+    }
     
     const allRules = await chrome.declarativeNetRequest.getDynamicRules();
     console.log("[v0] [DEBUG] All dynamic rules after Pomodoro enable:", JSON.stringify(allRules, null, 2));
@@ -412,14 +474,20 @@ export async function disablePomodoroBlocking() {
       .filter((id) => id >= POMODORO_RULE_ID_START && id < USER_BLACKLIST_RULE_ID_START);
 
     if (pomodoroRuleIds.length > 0) {
-      await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: pomodoroRuleIds,
-      });
-      console.log(
-        "[v0] Pomodoro blocking disabled. Removed",
-        pomodoroRuleIds.length,
-        "rules."
-      );
+      try {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+          removeRuleIds: pomodoroRuleIds,
+        });
+        console.log(
+          "[v0] Pomodoro blocking disabled. Removed",
+          pomodoroRuleIds.length,
+          "rules."
+        );
+      } catch (error) {
+        console.error("[v0] ERROR: Failed to remove Pomodoro DNR rules:", error);
+        console.error("[v0] ERROR: Attempted to remove Pomodoro rule IDs:", pomodoroRuleIds);
+        throw error; // Re-throw to maintain existing error handling
+      }
     }
   });
 }

@@ -45,6 +45,36 @@ export default defineConfig({
             console.error(`[vite-plugin-copy-static] Failed to read ${icon}:`, error);
           }
         });
+        
+        // Copia blocked.html
+        try {
+          if (existsSync('public/blocked.html')) {
+            this.emitFile({
+              type: 'asset',
+              fileName: 'blocked.html',
+              source: readFileSync('public/blocked.html', 'utf-8')
+            });
+          } else {
+            console.warn('[vite-plugin-copy-static] blocked.html not found, skipping...');
+          }
+        } catch (error) {
+          console.error('[vite-plugin-copy-static] Failed to read blocked.html:', error);
+        }
+        
+        // Copia blocked.js
+        try {
+          if (existsSync('public/blocked.js')) {
+            this.emitFile({
+              type: 'asset',
+              fileName: 'blocked.js',
+              source: readFileSync('public/blocked.js', 'utf-8')
+            });
+          } else {
+            console.warn('[vite-plugin-copy-static] blocked.js not found, skipping...');
+          }
+        } catch (error) {
+          console.error('[vite-plugin-copy-static] Failed to read blocked.js:', error);
+        }
       }
     }
   ],

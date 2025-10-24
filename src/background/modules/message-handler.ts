@@ -38,7 +38,7 @@ export async function notifyStateUpdate() {
     // broadcast: use callback and check chrome.runtime.lastError to avoid
     // noisy benign errors when UIs close (like popup/options). Ignore both
     // "Receiving end does not exist" and the port-closed message.
-    chrome.runtime.sendMessage({ type: MESSAGE.STATE_UPDATED, payload: { state: appState } }, () => {
+    chrome.runtime.sendMessage({ type: MESSAGE.STATE_UPDATED, payload: { state: appState } }, (response) => {
       const err = chrome.runtime.lastError;
       // Use an explicit, anchored whitelist of ignorable error message prefixes so changes
       // in Chrome's exact text won't accidentally bypass the filter.
@@ -47,6 +47,7 @@ export async function notifyStateUpdate() {
         "Receiving end does not exist",
         "The message port closed before a response was received",
         "Could not establish connection. Receiving end does not exist",
+        "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received",
       ];
       const isIgnorable = ignorablePrefixes.some((p) => errMsg === p || errMsg.startsWith(p));
       // Only warn if there's an error AND it's NOT one of the expected "no receiver" errors

@@ -1,4 +1,4 @@
-const l = {
+const s = {
   BLACKLIST: "blacklist",
   TIME_LIMITS: "timeLimits",
   DAILY_USAGE: "dailyUsage",
@@ -7,7 +7,7 @@ const l = {
   SETTINGS: "settings",
   CURRENTLY_TRACKING: "currentlyTracking"
   // Chave para persistir a aba ativa na sessão
-}, f = 1e4, A = {
+}, A = 1e4, y = {
   // Estado
   GET_INITIAL_STATE: "GET_INITIAL_STATE",
   STATE_GET: "STATE_GET",
@@ -36,57 +36,76 @@ const l = {
 };
 window.v0ContentScriptInjected = !0;
 console.log("[v0][CS] Content script loaded");
-let y = !1;
-chrome.runtime.onMessage.addListener((e, t, n) => {
+(async function() {
   try {
-    if (e?.type === A.TOGGLE_ZEN_MODE)
-      return C(e.payload?.preset), n?.({ success: !0 }), !0;
-  } catch (r) {
-    console.warn("[v0][CS] TOGGLE_ZEN_MODE failed:", r), n?.({ success: !1, error: String(r) });
+    const e = location.hostname, { [s.BLACKLIST]: o } = await chrome.storage.local.get(s.BLACKLIST);
+    if (o && Array.isArray(o) && o.some((n) => {
+      const c = typeof n == "string" ? n : n.domain;
+      return e === c || e.endsWith("." + c);
+    })) {
+      console.log("[v0][CS] Blocked domain loaded from cache, redirecting...");
+      const n = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(e)}`);
+      location.href = n;
+      return;
+    }
+  } catch (e) {
+    console.error("[v0][CS] Failed to check blocked domain:", e);
+  }
+})();
+let I = !1;
+chrome.runtime.onMessage.addListener((t, e, o) => {
+  try {
+    if (t?.type === y.TOGGLE_ZEN_MODE)
+      return C(t.payload?.preset), o?.({ success: !0 }), !0;
+  } catch (a) {
+    console.warn("[v0][CS] TOGGLE_ZEN_MODE failed:", a), o?.({ success: !1, error: String(a) });
   }
   return !1;
 });
-const g = async () => {
-  if (!y) {
-    y = !0;
+const f = async () => {
+  if (!I) {
+    I = !0;
     try {
-      const e = document.body?.innerText?.slice(0, f) ?? "", t = location.href, n = await L(e, t), r = crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-      await chrome.runtime.sendMessage({ type: A.CONTENT_ANALYSIS_RESULT, id: r, source: "content-script", ts: Date.now(), payload: { result: n } });
-    } catch (e) {
-      console.error("[v0][CS] analyzePageContent error:", e);
+      const t = document.body?.innerText?.slice(0, A) ?? "", e = location.href, o = await L(t, e), a = crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+      await chrome.runtime.sendMessage({ type: y.CONTENT_ANALYSIS_RESULT, id: a, source: "content-script", ts: Date.now(), payload: { result: o } }, (n) => {
+        const c = chrome.runtime.lastError;
+        c && !c.message.includes("Receiving end does not exist") && !c.message.includes("message channel closed") && console.warn("[v0][CS] Content analysis message error:", c.message);
+      });
+    } catch (t) {
+      console.error("[v0][CS] analyzePageContent error:", t);
     }
   }
 };
-document.readyState === "complete" || document.readyState === "interactive" ? g() : document.addEventListener("DOMContentLoaded", g, { once: !0 });
-async function L(e, t) {
-  const { [l.SETTINGS]: n } = await chrome.storage.sync.get(l.SETTINGS), r = n?.productiveKeywords || [], d = n?.distractingKeywords || [], M = e.toLowerCase();
-  let E = 0, S = 0;
-  const I = (a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  r.forEach((a) => {
-    const u = new RegExp(`\\b${I(a)}\\b`, "gi"), i = M.match(u);
-    i && (E += i.length);
-  }), d.forEach((a) => {
-    const u = new RegExp(`\\b${I(a)}\\b`, "gi"), i = M.match(u);
-    i && (S += i.length);
+document.readyState === "complete" || document.readyState === "interactive" ? f() : document.addEventListener("DOMContentLoaded", f, { once: !0 });
+async function L(t, e) {
+  const { [s.SETTINGS]: o } = await chrome.storage.sync.get(s.SETTINGS), a = o?.productiveKeywords || [], n = o?.distractingKeywords || [], c = t.toLowerCase();
+  let S = 0, u = 0;
+  const g = (l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  a.forEach((l) => {
+    const m = new RegExp(`\\b${g(l)}\\b`, "gi"), d = c.match(m);
+    d && (S += d.length);
+  }), n.forEach((l) => {
+    const m = new RegExp(`\\b${g(l)}\\b`, "gi"), d = c.match(m);
+    d && (u += d.length);
   });
-  const m = E + S, O = m > 0 ? S / m : 0;
+  const M = S + u, O = M > 0 ? u / M : 0;
   let T = "neutral";
-  return O > 0.6 ? T = "distracting" : O < 0.4 && E > 0 && (T = "productive"), {
-    url: t,
+  return O > 0.6 ? T = "distracting" : O < 0.4 && S > 0 && (T = "productive"), {
+    url: e,
     classification: T,
     score: O,
     categories: {},
     flagged: T === "distracting"
   };
 }
-let _ = !1, c = null, s = "", o = null;
-function C(e) {
-  _ ? (c !== null && (document.body.innerHTML = c, document.body.style.background = s, c = null, s = ""), o && (o.remove(), o = null), _ = !1, console.log("[v0][CS] Zen Mode deactivated")) : (c = document.body.innerHTML, s = document.body.style.background || "", R(e), _ = !0, console.log("[v0][CS] Zen Mode activated"));
+let _ = !1, i = null, E = "", r = null;
+function C(t) {
+  _ ? (i !== null && (document.body.innerHTML = i, document.body.style.background = E, i = null, E = ""), r && (r.remove(), r = null), _ = !1, console.log("[v0][CS] Zen Mode deactivated")) : (i = document.body.innerHTML, E = document.body.style.background || "", R(t), _ = !0, console.log("[v0][CS] Zen Mode activated"));
 }
-function R(e) {
+function R(t) {
   try {
-    const t = p();
-    e && D(e), o && o.remove(), o = document.createElement("div"), o.id = "zen-mode-container", o.style.cssText = `
+    const e = h();
+    t && p(t), r && r.remove(), r = document.createElement("div"), r.id = "zen-mode-container", r.style.cssText = `
       max-width: 800px;
       margin: 0 auto;
       padding: 40px 20px;
@@ -95,24 +114,24 @@ function R(e) {
       line-height: 1.6;
       color: #333;
       background: #fff;
-    `, o.innerHTML = t, document.body.innerHTML = "", document.body.appendChild(o), document.body.style.background = "#f5f5f5";
-  } catch (t) {
-    throw console.error("[v0][CS] Error applying Zen Mode:", t), c !== null && (document.body.innerHTML = c, document.body.style.background = s), t;
+    `, r.innerHTML = e, document.body.innerHTML = "", document.body.appendChild(r), document.body.style.background = "#f5f5f5";
+  } catch (e) {
+    throw console.error("[v0][CS] Error applying Zen Mode:", e), i !== null && (document.body.innerHTML = i, document.body.style.background = E), e;
   }
 }
-function p() {
-  const e = document.querySelector("article"), t = document.querySelector("main"), n = document.querySelector('[role="main"]');
-  return e ? e.innerHTML : t ? t.innerHTML : n ? n.innerHTML : document.body.innerHTML;
+function h() {
+  const t = document.querySelector("article"), e = document.querySelector("main"), o = document.querySelector('[role="main"]');
+  return t ? t.innerHTML : e ? e.innerHTML : o ? o.innerHTML : document.body.innerHTML;
 }
-async function D(e) {
+async function p(t) {
   try {
-    const { [l.SITE_CUSTOMIZATIONS]: t } = await chrome.storage.local.get(
-      l.SITE_CUSTOMIZATIONS
-    ), n = t?.[e];
-    n?.selectorsToRemove && n.selectorsToRemove.forEach((r) => {
-      document.querySelectorAll(r).forEach((d) => d.remove());
+    const { [s.SITE_CUSTOMIZATIONS]: e } = await chrome.storage.local.get(
+      s.SITE_CUSTOMIZATIONS
+    ), o = e?.[t];
+    o?.selectorsToRemove && o.selectorsToRemove.forEach((a) => {
+      document.querySelectorAll(a).forEach((n) => n.remove());
     });
-  } catch (t) {
-    console.warn("[v0][CS] applyPreset failed:", t);
+  } catch (e) {
+    console.warn("[v0][CS] applyPreset failed:", e);
   }
 }

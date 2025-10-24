@@ -9,6 +9,33 @@ import { MESSAGE } from "../shared/types";
 
 console.log("[v0][CS] Content script loaded");
 
+// ─────────────────────────────────────────────────────────────
+// Verificação imediata de domínios bloqueados (cache bypass)
+// ─────────────────────────────────────────────────────────────
+(async function checkIfBlockedDomain() {
+  try {
+    const currentDomain = location.hostname;
+    const { [STORAGE_KEYS.BLACKLIST]: blacklist } = await chrome.storage.local.get(STORAGE_KEYS.BLACKLIST);
+    
+    if (blacklist && Array.isArray(blacklist)) {
+      const isBlocked = blacklist.some((entry: any) => {
+        const domain = typeof entry === 'string' ? entry : entry.domain;
+        return currentDomain === domain || currentDomain.endsWith('.' + domain);
+      });
+      
+      if (isBlocked) {
+        console.log('[v0][CS] Blocked domain loaded from cache, redirecting...');
+        // Redirecionar para página de bloqueio customizada
+        const blockedPageUrl = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(currentDomain)}`);
+        location.href = blockedPageUrl;
+        return; // Para execução do resto do script
+      }
+    }
+  } catch (e) {
+    console.error('[v0][CS] Failed to check blocked domain:', e);
+  }
+})();
+
 // Evita múltiplas análises na mesma navegação
 let hasAnalyzed = false;
 
@@ -40,7 +67,13 @@ const analyzePageContent = async () => {
     const url = location.href;
       const result = await analyzeText(text, url);
       const id: MessageId = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`) as any;
-      await chrome.runtime.sendMessage({ type: MESSAGE.CONTENT_ANALYSIS_RESULT, id, source: "content-script", ts: Date.now(), payload: { result } } as unknown as Message);
+      await chrome.runtime.sendMessage({ type: MESSAGE.CONTENT_ANALYSIS_RESULT, id, source: "content-script", ts: Date.now(), payload: { result } } as unknown as Message, (response) => {
+        // Handle response or ignore errors
+        const err = chrome.runtime.lastError;
+        if (err && !err.message.includes("Receiving end does not exist") && !err.message.includes("message channel closed")) {
+          console.warn("[v0][CS] Content analysis message error:", err.message);
+        }
+      });
   } catch (e) {
     console.error("[v0][CS] analyzePageContent error:", e);
   }
