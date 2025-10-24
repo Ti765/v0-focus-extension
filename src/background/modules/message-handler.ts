@@ -9,32 +9,36 @@ import { addToBlacklist, removeFromBlacklist } from "./blocker";
 import { startPomodoro, stopPomodoro } from "./pomodoro";
 import { setTimeLimit } from "./usage-tracker";
 import { handleContentAnalysisResult } from "./content-analyzer";
-import { deepEqual } from "../../shared/utils";
+
+// Hash do último estado emitido para evitar broadcasts desnecessários
+let lastEmittedHash: string = "";
 
 /** Notifica todas as UIs (popup/options) que o state mudou */
 export async function notifyStateUpdate() {
   try {
     const appState = await getAppState();
-    // Guard: avoid broadcasting identical state repeatedly (which can cause UI echo loops)
-    try {
-      if ((notifyStateUpdate as any)._lastEmitted && deepEqual((notifyStateUpdate as any)._lastEmitted, appState)) {
-        // no-op: state identical to last emitted
-        return;
+    
+    // Hash determinístico para evitar false negatives
+    // Use deterministic serialization that sorts all nested object keys recursively
+    const currentHash = JSON.stringify(appState, (_, value) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const sortedObj: any = {};
+        Object.keys(value).sort().forEach(k => {
+          sortedObj[k] = value[k];
+        });
+        return sortedObj;
       }
-      // store a deep clone to avoid later mutations affecting the saved snapshot
-      try {
-        (notifyStateUpdate as any)._lastEmitted = JSON.parse(JSON.stringify(appState));
-      } catch (e) {
-        // fallback: store as-is
-        (notifyStateUpdate as any)._lastEmitted = appState;
-      }
-    } catch (e) {
-      // if deepEqual fails for any reason, proceed with broadcast
+      return value;
+    });
+    if (currentHash === lastEmittedHash) {
+      return; // Evita broadcast desnecessário
     }
+    lastEmittedHash = currentHash;
+    
     // broadcast: use callback and check chrome.runtime.lastError to avoid
     // noisy benign errors when UIs close (like popup/options). Ignore both
     // "Receiving end does not exist" and the port-closed message.
-  chrome.runtime.sendMessage({ type: MESSAGE.STATE_UPDATED, payload: { state: appState } }, () => {
+    chrome.runtime.sendMessage({ type: MESSAGE.STATE_UPDATED, payload: { state: appState } }, () => {
       const err = chrome.runtime.lastError;
       // Use an explicit, anchored whitelist of ignorable error message prefixes so changes
       // in Chrome's exact text won't accidentally bypass the filter.
@@ -172,8 +176,6 @@ export async function handleMessage(
   message: Message & { skipNotify?: boolean },
   _sender: chrome.runtime.MessageSender
 ): Promise<any> {
-  const skipNotify = message.skipNotify === true;
-  const notifyIfNeeded = () => !skipNotify && notifyStateUpdate();
 
   switch (message.type) {
     case MESSAGE.GET_INITIAL_STATE: {
@@ -183,14 +185,14 @@ export async function handleMessage(
     case MESSAGE.ADD_TO_BLACKLIST: {
       const domain = (message.payload as any)?.domain;
       if (typeof domain === "string") await addToBlacklist(domain);
-      await notifyIfNeeded();
+      await notifyStateUpdate();
       return { success: true };
     }
 
     case MESSAGE.REMOVE_FROM_BLACKLIST: {
       const domain = (message.payload as any)?.domain;
       if (typeof domain === "string") await removeFromBlacklist(domain);
-      await notifyIfNeeded();
+      await notifyStateUpdate();
       return { success: true };
     }
 
@@ -211,20 +213,20 @@ export async function handleMessage(
       if (typeof domain === "string" && typeof minutes === "number") {
         await setTimeLimit(domain, minutes);
       }
-      await notifyIfNeeded();
+      await notifyStateUpdate();
       return { success: true };
     }
 
     case MESSAGE.CONTENT_ANALYSIS_RESULT: {
       await handleContentAnalysisResult((message.payload as any)?.result);
-      await notifyIfNeeded();
+      await notifyStateUpdate();
       return { success: true };
     }
 
     case MESSAGE.STATE_PATCH: {
       const raw = message.payload ?? {};
-      // accept payload legacy (settings direct) or new ({ patch: { settings } })
-      const patch = (raw && (raw as any).patch && (raw as any).patch.settings) ? (raw as any).patch.settings : (raw as any).settings ?? raw;
+      // Simplified payload extraction with defensive handling
+      const patch = (raw as any).patch?.settings ?? (raw as any).settings ?? raw;
 
       if (!patch || typeof patch !== 'object') {
         return { success: false, error: "Invalid STATE_PATCH payload" };
@@ -242,7 +244,7 @@ export async function handleMessage(
       }
 
       await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: next });
-      await notifyIfNeeded();
+      await notifyStateUpdate();
       return { success: true };
     }
 

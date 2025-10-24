@@ -1,8 +1,1 @@
-[
-  {
-    "id": 1,
-    "priority": 1,
-    "action": { "type": "allow" },
-    "condition": { "urlFilter": "*" }
-  }
-]
+[]

@@ -181,6 +181,27 @@ export interface BaseMessage<T extends MessageType = MessageType, P = unknown> {
   source: ContextSource;
   ts: number; // epoch ms
   payload?: P;
+  
+  /**
+   * Se true, o Service Worker NÃO emitirá STATE_UPDATED após processar.
+   * 
+   * USE APENAS quando:
+   * - A UI que enviou já fez update otimista do seu estado
+   * - A operação é parte de um batch (evitar múltiplas broadcasts)
+   * 
+   * CUIDADO: Outras UIs abertas NÃO serão notificadas se usar skipNotify!
+   * 
+   * Exemplos corretos de uso:
+   * - addToBlacklist: true (UI já atualizou lista localmente)
+   * - removeFromBlacklist: true (UI já removeu localmente)
+   * - updateSettings: true (UI já aplicou mudanças)
+   * 
+   * Exemplos onde NÃO usar:
+   * - startPomodoro: false (timer gerenciado pelo backend)
+   * - setTimeLimit: false (pode causar bloqueio imediato)
+   * - toggleZenMode: false (afeta outras UIs)
+   */
+  skipNotify?: boolean;
 }
 
 /* ===== Payloads ===== */

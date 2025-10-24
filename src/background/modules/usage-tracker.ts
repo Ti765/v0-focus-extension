@@ -2,6 +2,11 @@ import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/
 import type { TimeLimitEntry } from "../../shared/types";
 import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
 import { normalizeDomain, extractDomain } from "../../shared/url";
+import { createDomainRegexPattern } from "../../shared/regex-utils";
+
+// Flag de debug para logs detalhados do DNR e tracking
+const DEBUG_DNR = true;
+const DEBUG_TRACKING = true;
 
 // --- Estado interno ---
 let activeTabId: number | null = null;
@@ -24,9 +29,6 @@ function generateLimitRuleId(domain: string): number {
   return LIMIT_RULE_BASE + offset;
 }
 
-function escapeForRegex(domain: string): string {
-  return domain.replace(/[+?^${}()|[\]\\\.-]/g, "\\$&");
-}
 
 // ---- Agendamento diário: limpar regras de sessão (reseta bloqueios de limite de tempo) ----
 export async function initializeDailySync() {
@@ -175,21 +177,44 @@ async function recordActiveTabUsage() {
   const result = await chrome.storage.session.get(STORAGE_KEYS.CURRENTLY_TRACKING);
   const trackingInfo = result[STORAGE_KEYS.CURRENTLY_TRACKING];
 
-  if (!trackingInfo || !trackingInfo.url || !trackingInfo.startTime) return;
+  if (!trackingInfo || !trackingInfo.url || !trackingInfo.startTime) {
+    if (DEBUG_TRACKING) {
+      console.log("[TRACKING-DEBUG] No active tracking info:", { trackingInfo });
+    }
+    return;
+  }
 
   const domain = extractDomain(trackingInfo.url);
   if (!domain) {
+    if (DEBUG_TRACKING) {
+      console.log("[TRACKING-DEBUG] Invalid domain from URL:", { url: trackingInfo.url });
+    }
     await stopTracking();
     return;
   }
 
   const timeSpent = Math.floor((Date.now() - trackingInfo.startTime) / 1000);
 
+  if (DEBUG_TRACKING) {
+    console.log("[TRACKING-DEBUG] Recording usage:", {
+      domain,
+      timeSpent,
+      url: trackingInfo.url,
+      startTime: new Date(trackingInfo.startTime).toISOString(),
+      endTime: new Date().toISOString()
+    });
+  }
+
   // reinicia período
   trackingInfo.startTime = Date.now();
   await chrome.storage.session.set({ [STORAGE_KEYS.CURRENTLY_TRACKING]: trackingInfo });
 
-  if (timeSpent < 1) return;
+  if (timeSpent < 1) {
+    if (DEBUG_TRACKING) {
+      console.log("[TRACKING-DEBUG] Skipping record, time spent < 1s");
+    }
+    return;
+  }
 
   const today = new Date().toISOString().split("T")[0];
   const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(
@@ -224,32 +249,56 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
   if (totalSecondsToday >= limitSeconds) {
     const ruleId = generateLimitRuleId(domain);
 
-    try {
-      const regex = `^https?:\\/\\/([^\\/]+\\.)?${escapeForRegex(domain)}(\\/|$)`;
-      const rule = {
-        id: ruleId,
-        priority: 3,
-        action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
-        condition: {
-          regexFilter: regex,
-          isUrlFilterCaseSensitive: false,
-          resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-        },
-      };
-      
-      console.log("[v0] [DEBUG] Time limit rule to add:", JSON.stringify(rule, null, 2));
-      
-      await chrome.declarativeNetRequest.updateSessionRules({
-        removeRuleIds: [ruleId], // remove se já existir
-        addRules: [rule],
-      });
-      
-      const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
-      console.log("[v0] [DEBUG] All session rules after time limit:", JSON.stringify(sessionRules, null, 2));
+      try {
+        if (DEBUG_TRACKING) {
+          console.log("[TRACKING-DEBUG] Time limit check:", {
+            domain,
+            totalSecondsToday,
+            limitSeconds,
+            limitMinutes,
+            exceeded: totalSecondsToday >= limitSeconds
+          });
+        }
 
-      console.log(
-        `[v0] Time limit reached for ${domain}. Session block rule ${ruleId} added.`
-      );
+        const regex = createDomainRegexPattern(domain);
+        const rule = {
+          id: ruleId,
+          priority: 3,
+          action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
+          condition: {
+            regexFilter: regex,
+            isUrlFilterCaseSensitive: false,
+            resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
+          },
+        };
+        
+        if (DEBUG_DNR) {
+          console.log("[DNR-DEBUG] Time limit session rule to add:", {
+            id: rule.id,
+            regex: rule.condition.regexFilter,
+            domain,
+            totalSecondsToday,
+            limitSeconds
+          });
+        }
+        
+        await chrome.declarativeNetRequest.updateSessionRules({
+          removeRuleIds: [ruleId], // remove se já existir
+          addRules: [rule],
+        });
+        
+        if (DEBUG_DNR) {
+          const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
+          console.log("[DNR-DEBUG] All session rules after time limit:", sessionRules);
+          console.log("[DNR-DEBUG] Session rules by domain:", sessionRules.map(r => ({
+            id: r.id,
+            regex: r.condition.regexFilter
+          })));
+        }
+
+        console.log(
+          `[v0] Time limit reached for ${domain}. Session block rule ${ruleId} added.`
+        );
 
       if (await notificationsAllowed()) {
         chrome.notifications.create(`limit-exceeded-${domain}`, {

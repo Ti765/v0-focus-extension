@@ -2,11 +2,10 @@ import { STORAGE_KEYS } from "../../shared/constants";
 import type { BlacklistEntry, Domain } from "../../shared/types";
 import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain } from "../../shared/url";
+import { createDomainRegexPattern } from "../../shared/regex-utils";
 
-function escapeForRegex(domain: string): string {
-  // Escapa pontos e traços para uso seguro no regex da URL
-  return domain.replace(/[+?^${}()|[\]\\\.-]/g, "\\$&");
-}
+// Flag de debug para logs detalhados do DNR
+const DEBUG_DNR = true;
 
 const POMODORO_RULE_ID_START = 1000;
 const USER_BLACKLIST_RULE_ID_START = 2000;
@@ -138,7 +137,6 @@ async function syncUserBlacklistRules() {
       if (!d) continue;
 
         let id = generateRuleIdForDomain(d);
-        // simple retry guard to avoid infinite loop if the ID space is exhausted
         let attempts = 0;
         const maxRetries = USER_BLACKLIST_RANGE;
 
@@ -146,25 +144,31 @@ async function syncUserBlacklistRules() {
         while (finalRuleIds.has(id) || existingUserRuleIds.has(id)) {
           attempts++;
           if (attempts >= maxRetries) {
-            console.error("[v0] Unable to find free rule ID in USER_BLACKLIST range; aborting sync for domain:", d);
-            throw new Error("USER_BLACKLIST_RULE_ID_RANGE_EXHAUSTED");
+            console.error(
+              `[v0] Rule ID range exhausted for domain: ${d}. ` +
+              `Consider increasing USER_BLACKLIST_RANGE or cleaning old rules.`
+            );
+            break; // Sai do while sem adicionar regra
           }
 
           id++;
           if (id >= USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE) {
             id = USER_BLACKLIST_RULE_ID_START;
           }
-
-          // sai quando achar um ID livre
-          if (!finalRuleIds.has(id) && !existingUserRuleIds.has(id)) break;
         }
 
-      finalRuleIds.add(id);
+        // Se saiu por esgotamento, não adicione a regra
+        if (attempts >= maxRetries) {
+          console.warn(`[v0] Skipping rule for ${d} - no free ID found`);
+          continue; // Próximo domínio
+        }
+
+        finalRuleIds.add(id);
 
       // Adiciona a regra se esse ID ainda não existe atualmente
       if (!existingUserRuleIds.has(id)) {
         // Usa regexFilter para casar tanto domínio raiz quanto subdomínios em http/https
-        const regex = `^https?:\\/\\/([^\\/]+\\.)?${escapeForRegex(d)}(\\/|$)`;
+        const regex = createDomainRegexPattern(d);
         rulesToAdd.push({
           id,
           priority: 1,
@@ -186,18 +190,31 @@ async function syncUserBlacklistRules() {
     );
 
     if (rulesToAdd.length > 0 || rulesToRemove.length > 0) {
-      // Log detalhado das regras antes de adicionar
-      console.log("[v0] [DEBUG] Rules to add:", JSON.stringify(rulesToAdd, null, 2));
-      console.log("[v0] [DEBUG] Rules to remove:", rulesToRemove);
+      if (DEBUG_DNR) {
+        console.log("[DNR-DEBUG] Blacklist domains:", blacklist.map((e: any) => e.domain));
+        console.log("[DNR-DEBUG] Rules to add (with regex):", rulesToAdd.map(r => ({
+          id: r.id,
+          regex: r.condition.regexFilter,
+          domain: blacklist.find((e: any) => generateRuleIdForDomain(e.domain) === r.id)?.domain
+        })));
+        console.log("[DNR-DEBUG] Rules to remove IDs:", rulesToRemove);
+      }
       
       await chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: rulesToRemove,
         addRules: rulesToAdd,
       });
       
-      // Verifica as regras após adicionar
-      const allRules = await chrome.declarativeNetRequest.getDynamicRules();
-      console.log("[v0] [DEBUG] All dynamic rules after sync:", JSON.stringify(allRules, null, 2));
+      if (DEBUG_DNR) {
+        const allRules = await chrome.declarativeNetRequest.getDynamicRules();
+        console.log("[DNR-DEBUG] All dynamic rules after sync:", allRules);
+        console.log("[DNR-DEBUG] Total rules count:", allRules.length);
+        console.log("[DNR-DEBUG] Rules by type:", {
+          pomodoro: allRules.filter(r => r.id >= POMODORO_RULE_ID_START && r.id < USER_BLACKLIST_RULE_ID_START).length,
+          blacklist: allRules.filter(r => r.id >= USER_BLACKLIST_RULE_ID_START && r.id < USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE).length,
+          other: allRules.filter(r => r.id < POMODORO_RULE_ID_START || r.id >= USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE).length
+        });
+      }
       
       console.log(
         "[v0] User blocking rules synced:",
@@ -226,7 +243,7 @@ export async function enablePomodoroBlocking() {
   const pomodoroRules: chrome.declarativeNetRequest.Rule[] = (blacklist as BlacklistEntry[]).map(
     (entry, index) => {
       const d = normalizeDomain(entry.domain);
-      const regex = `^https?:\\/\\/([^\\/]+\\.)?${escapeForRegex(d)}(\\/|$)`;
+      const regex = createDomainRegexPattern(d);
       return {
         id: POMODORO_RULE_ID_START + index, // sequência simples e previsível
         priority: 2, // acima das regras de usuário

@@ -22,27 +22,15 @@ export default function PomodoroTimer() {
       return;
     }
 
-    // If there's no startedAt, don't attempt timer calculations
-    if (!pomodoro?.state?.startedAt) {
-      setDisplayTime(Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000));
-      return;
-    }
-
-    // A lógica do timer agora é gerenciada na UI para uma contagem regressiva suave
+    // Simplesmente use o remainingMs do estado (backend é source of truth)
+    // Atualiza a cada segundo para dar feedback visual
     const interval = setInterval(() => {
-      const startedAtRaw = pomodoro?.state?.startedAt;
-      const startedAtMs = typeof startedAtRaw === "number" ? startedAtRaw : new Date(startedAtRaw as any).getTime();
-      const elapsedSeconds = (Date.now() - (startedAtMs || Date.now())) / 1000;
-      const remaining = Math.max(0, Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000) - elapsedSeconds);
-      setDisplayTime(remaining);
-
-      if (remaining <= 0) {
-        clearInterval(interval);
-      }
-    }, 250); // Atualiza 4x por segundo para ser mais preciso
+      const currentRemaining = Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000);
+      setDisplayTime(Math.max(0, currentRemaining));
+    }, 1000);
 
     return () => clearInterval(interval);
-  }, [pomodoro?.state?.phase, pomodoro?.state?.startedAt, pomodoro?.state?.remainingMs, focusMinutes]);
+  }, [pomodoro?.state?.phase, pomodoro?.state?.remainingMs, focusMinutes]);
 
   const handleStart = () => {
     startPomodoro(focusMinutes, breakMinutes);
