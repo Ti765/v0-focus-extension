@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useStore } from "./store";
+import { useStore, useStoreShallow } from "./store";
 import { ExternalLink, Focus } from "lucide-react";
 import BlacklistManager from "./components/BlacklistManager";
 import PomodoroTimer from "./PomodoroTimer";
@@ -13,7 +13,7 @@ declare const chrome: any;
 type Tab = "pomodoro" | "blacklist" | "dashboard";
 
 export default function App() {
-  const { isLoading, error, setError } = useStore((s: any) => ({
+  const { isLoading, error, setError } = useStoreShallow((s) => ({
     isLoading: s.isLoading,
     error: s.error,
     setError: s.setError,

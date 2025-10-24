@@ -97,11 +97,17 @@ export async function getAppState(): Promise<AppState> {
   return {
     isLoading: false,
     error: null,
-    blacklist: ((local[STORAGE_KEYS.BLACKLIST] || []) as any[]).map((entry) =>
-      typeof entry === "object" && entry !== null && "domain" in entry
-        ? String((entry as any).domain)
-        : String(entry)
-    ),
+    blacklist: ((local[STORAGE_KEYS.BLACKLIST] || []) as any[]).map((entry) => {
+      // Ensure we always return a string, handling both legacy objects and strings
+      if (typeof entry === "string") {
+        return entry;
+      }
+      if (typeof entry === "object" && entry !== null && "domain" in entry) {
+        return String((entry as any).domain);
+      }
+      // Fallback: convert anything else to string
+      return String(entry);
+    }),
     timeLimits: local[STORAGE_KEYS.TIME_LIMITS] || [],
     dailyUsage: local[STORAGE_KEYS.DAILY_USAGE] || {},
     pomodoro:

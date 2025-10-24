@@ -1,5 +1,6 @@
 // src/popup/store.ts
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import type { AppState, Message } from "../shared/types";
 import { MESSAGE } from "../shared/types";
 import { chromeAPI } from "../shared/chrome-mock";
@@ -346,3 +347,7 @@ function getListenerState(storeInstance: ReturnType<typeof useStore> & object): 
   }
   return state;
 }
+
+// Helper function to use store with shallow comparison
+export const useStoreShallow = <T>(selector: (state: PopupStore) => T) => 
+  useStore(useShallow(selector));

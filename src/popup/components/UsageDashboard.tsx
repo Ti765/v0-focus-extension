@@ -1,4 +1,4 @@
-import { useStore } from "../store";
+import { useStoreShallow } from "../store";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, ChartOptions, ChartData } from "chart.js";
 import { Pie, Bar } from "react-chartjs-2";
 
@@ -7,7 +7,7 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarEle
 
 export default function UsageDashboard() {
   // Subscribe only to dailyUsage to avoid re-render storms when unrelated parts of the store change
-  const dailyUsage = useStore((s: any) => s.dailyUsage ?? {});
+  const dailyUsage = useStoreShallow((s) => s.dailyUsage ?? {});
 
   // --- PREPARAÇÃO DOS DADOS ---
   const today = new Date().toISOString().split("T")[0];

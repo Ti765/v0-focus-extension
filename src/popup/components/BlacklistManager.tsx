@@ -1,31 +1,43 @@
 // src/popup/BlacklistManager.tsx
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { normalizeDomain } from "../../shared/url";
-import { useStore } from "../store";
+import { useStoreShallow } from "../store";
 import debug from "../../lib/debug";
 
 export default function BlacklistManager(): JSX.Element {
   // Seleciona apenas o que a UI precisa, com shallow compare para evitar rerenders desnecessários
   const { blacklist, addToBlacklist, removeFromBlacklist, error, setError } =
-    useStore((s: any) => ({
-      blacklist: s.blacklist as string[] | any[],
-      addToBlacklist: s.addToBlacklist as (domain: string) => Promise<void> | void,
-      removeFromBlacklist: s.removeFromBlacklist as (domain: string) => Promise<void> | void,
-      error: s.error as string | null,
-      setError: s.setError as (msg: string | null) => void,
+    useStoreShallow((s) => ({
+      blacklist: s.blacklist,
+      addToBlacklist: s.addToBlacklist,
+      removeFromBlacklist: s.removeFromBlacklist,
+      error: s.error,
+      setError: s.setError,
     }));
 
   const [newDomain, setNewDomain] = useState("");
   const sendingRef = useRef(false); // trava simples contra cliques múltiplos
 
+  const errorTimeoutRef = useRef<number | null>(null);
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+      }
+    };
+  }, []);
+  
   function resetErrorSoon() {
-    // Evita que mensagens antigas “grudem” na UI
-    // (sem efeito/ciclo: apenas agenda um clear)
-    window.clearTimeout((resetErrorSoon as any).__t);
-    (resetErrorSoon as any).__t = window.setTimeout(() => setError(null), 2500);
+    // Evita que mensagens antigas "grudem" na UI
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+    }
+    errorTimeoutRef.current = setTimeout(() => setError(null), 2500);
   }
 
   async function handleAdd() {

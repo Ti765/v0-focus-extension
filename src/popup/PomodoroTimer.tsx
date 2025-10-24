@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useStore } from "./store";
+import { useStoreShallow } from "./store";
 import type { PopupStore } from "./store";
 import { Play, Square, Clock } from "lucide-react";
 
 export default function PomodoroTimer() {
-  const { pomodoro, startPomodoro, stopPomodoro } = useStore((s: PopupStore) => ({
+  const { pomodoro, startPomodoro, stopPomodoro } = useStoreShallow((s: PopupStore) => ({
     pomodoro: s.pomodoro,
     startPomodoro: s.startPomodoro,
     stopPomodoro: s.stopPomodoro,
@@ -42,7 +42,7 @@ export default function PomodoroTimer() {
     }, 250); // Atualiza 4x por segundo para ser mais preciso
 
     return () => clearInterval(interval);
-  }, [pomodoro?.state?.phase, pomodoro?.state?.startedAt, pomodoro?.state?.remainingMs, focusMinutes]);
+  }, [pomodoro?.state?.phase, pomodoro?.state?.startedAt, pomodoro?.state?.remainingMs]);
 
   const handleStart = () => {
     startPomodoro(focusMinutes, breakMinutes);
