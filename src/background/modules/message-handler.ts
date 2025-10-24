@@ -176,6 +176,9 @@ export async function handleMessage(
   message: Message & { skipNotify?: boolean },
   _sender: chrome.runtime.MessageSender
 ): Promise<any> {
+  console.log("[v0] DEBUG: Message handler - type:", message.type);
+  console.log("[v0] DEBUG: Message handler - payload:", message.payload);
+  console.log("[v0] DEBUG: Message handler - sender:", _sender);
 
   switch (message.type) {
     case MESSAGE.GET_INITIAL_STATE: {

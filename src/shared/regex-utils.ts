@@ -34,3 +34,35 @@ export function createDomainRegexPattern(domain: string): string {
   // 4. (/.*)? - Caminho opcional (mas sem âncora final)
   return `^https?://([^/]*\\.)?${escaped}(/.*)?$`;
 }
+
+/**
+ * Validates a regex pattern for Chrome DNR compatibility
+ * @param pattern - The regex pattern to validate
+ * @returns Object with validation result and error message if invalid
+ */
+export function validateDNRRegex(pattern: string): { valid: boolean; error?: string } {
+  // Chrome DNR regex constraints
+  const maxLength = 2048;
+  
+  if (pattern.length > maxLength) {
+    return { valid: false, error: `Regex too long: ${pattern.length} > ${maxLength}` };
+  }
+  
+  // Test if pattern is valid RE2 syntax
+  try {
+    new RegExp(pattern);
+    return { valid: true };
+  } catch (e) {
+    return { valid: false, error: `Invalid regex: ${e}` };
+  }
+}
+
+/**
+ * Creates a urlFilter pattern for DNR (alternative to regexFilter)
+ * @param domain - The domain to create a pattern for
+ * @returns A urlFilter pattern string
+ */
+export function createDomainUrlFilter(domain: string): string {
+  // The || prefix matches domain and all subdomains in DNR
+  return `||${domain}`;
+}

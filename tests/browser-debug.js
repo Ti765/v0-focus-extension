@@ -1,233 +1,316 @@
 /**
- * Script de diagnóstico para executar no console do navegador
- * Execute este script no console da extensão para diagnosticar problemas
+ * Comprehensive Extension Diagnostic Script
+ * Run this in the browser console to diagnose extension issues
  */
 
-console.log('🔍 Iniciando diagnóstico da extensão...\n');
+console.log('🔍 Starting Focus Extension Diagnostic...');
 
-// Função para testar comunicação
-async function testCommunication() {
-  console.log('📡 Testando comunicação...');
-  
+// Helper function to safely execute async code
+async function safeExecute(name, fn) {
   try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'GET_INITIAL_STATE',
-      payload: null
-    });
-    
-    console.log('✅ Comunicação funcionando:', response);
-    return true;
+    console.log(`\n📋 Testing: ${name}`);
+    const result = await fn();
+    console.log(`✅ ${name}: SUCCESS`, result);
+    return result;
   } catch (error) {
-    console.log('❌ Erro na comunicação:', error);
-    return false;
+    console.error(`❌ ${name}: FAILED`, error);
+    return null;
   }
 }
 
-// Função para testar storage
-async function testStorage() {
-  console.log('💾 Testando storage...');
-  
-  try {
-    // Testa local storage
-    await chrome.storage.local.set({ test: 'data' });
-    const localData = await chrome.storage.local.get('test');
-    console.log('✅ Local storage funcionando:', localData);
-    
-    // Testa sync storage
-    await chrome.storage.sync.set({ test: 'data' });
-    const syncData = await chrome.storage.sync.get('test');
-    console.log('✅ Sync storage funcionando:', syncData);
-    
-    // Testa session storage
-    await chrome.storage.session.set({ test: 'data' });
-    const sessionData = await chrome.storage.session.get('test');
-    console.log('✅ Session storage funcionando:', sessionData);
-    
-    return true;
-  } catch (error) {
-    console.log('❌ Erro no storage:', error);
-    return false;
+// 1. Check if extension is loaded and accessible
+async function checkExtensionLoaded() {
+  if (typeof chrome === 'undefined') {
+    throw new Error('Chrome extension API not available');
   }
+  
+  if (!chrome.runtime) {
+    throw new Error('Chrome runtime not available');
+  }
+  
+  const manifest = chrome.runtime.getManifest();
+  console.log('📦 Extension manifest:', manifest);
+  
+  return {
+    manifest,
+    version: manifest.version,
+    name: manifest.name
+  };
 }
 
-// Função para testar DNR
-async function testDNR() {
-  console.log('🚫 Testando DNR...');
+// 2. Check storage state
+async function checkStorageState() {
+  const storage = await chrome.storage.local.get();
+  const syncStorage = await chrome.storage.sync.get();
   
+  console.log('💾 Local storage keys:', Object.keys(storage));
+  console.log('💾 Sync storage keys:', Object.keys(syncStorage));
+  
+  // Check critical keys
+  const criticalKeys = ['blacklist', 'timeLimits', 'dailyUsage', 'pomodoroStatus'];
+  const missingKeys = criticalKeys.filter(key => !(key in storage));
+  
+  if (missingKeys.length > 0) {
+    console.warn('⚠️ Missing critical storage keys:', missingKeys);
+  }
+  
+  // Check data types
+  if (storage.timeLimits && !Array.isArray(storage.timeLimits)) {
+    console.error('❌ timeLimits is not an array:', typeof storage.timeLimits);
+  }
+  
+  if (storage.dailyUsage && typeof storage.dailyUsage !== 'object') {
+    console.error('❌ dailyUsage is not an object:', typeof storage.dailyUsage);
+  }
+  
+  // Check if dailyUsage has today's date
+  const today = new Date().toISOString().split('T')[0];
+  if (storage.dailyUsage && !storage.dailyUsage[today]) {
+    console.warn('⚠️ dailyUsage missing today\'s date:', today);
+  }
+  
+  return {
+    local: storage,
+    sync: syncStorage,
+    missingKeys,
+    today
+  };
+}
+
+// 3. Check DNR rules
+async function checkDNRRules() {
   try {
-    // Lista regras existentes
-    const rules = await chrome.declarativeNetRequest.getSessionRules();
-    console.log('✅ DNR funcionando, regras encontradas:', rules.length);
+    const dynamicRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
     
-    // Testa criação de regra
-    const testRule = {
-      id: 9999,
-      priority: 1,
-      action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
-      condition: {
-        regexFilter: '.*test-debug\\.com.*',
-        isUrlFilterCaseSensitive: false,
-        resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-      },
+    console.log('🛡️ Dynamic rules count:', dynamicRules.length);
+    console.log('🛡️ Session rules count:', sessionRules.length);
+    
+    // Categorize rules
+    const pomodoroRules = dynamicRules.filter(r => r.id >= 1000 && r.id < 2000);
+    const blacklistRules = dynamicRules.filter(r => r.id >= 2000 && r.id < 3000);
+    const otherRules = dynamicRules.filter(r => r.id < 1000 || r.id >= 3000);
+    
+    console.log('📊 Rule breakdown:');
+    console.log('  - Pomodoro rules:', pomodoroRules.length);
+    console.log('  - Blacklist rules:', blacklistRules.length);
+    console.log('  - Other rules:', otherRules.length);
+    
+    // Test regex patterns
+    if (blacklistRules.length > 0) {
+      const testRule = blacklistRules[0];
+      console.log('🧪 Testing regex pattern:', testRule.condition.regexFilter);
+      
+      const testUrls = [
+        'https://example.com',
+        'https://www.example.com',
+        'https://subdomain.example.com'
+      ];
+      
+      testUrls.forEach(url => {
+        try {
+          const regex = new RegExp(testRule.condition.regexFilter);
+          const matches = regex.test(url);
+          console.log(`  ${matches ? '✅' : '❌'} ${url}`);
+        } catch (e) {
+          console.error(`  ❌ Invalid regex for ${url}:`, e);
+        }
+      });
+    }
+    
+    return {
+      dynamic: dynamicRules,
+      session: sessionRules,
+      pomodoro: pomodoroRules,
+      blacklist: blacklistRules,
+      other: otherRules
     };
-    
-    await chrome.declarativeNetRequest.updateSessionRules({
-      addRules: [testRule]
-    });
-    console.log('✅ Regra DNR criada com sucesso');
-    
-    // Remove a regra de teste
-    await chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [9999]
-    });
-    console.log('✅ Regra DNR removida com sucesso');
-    
-    return true;
   } catch (error) {
-    console.log('❌ Erro no DNR:', error);
-    return false;
+    console.error('❌ DNR API not available or failed:', error);
+    return null;
   }
 }
 
-// Função para testar tabs
-async function testTabs() {
-  console.log('📑 Testando tabs...');
-  
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    console.log('✅ Tabs funcionando, aba ativa:', tabs[0]?.url);
-    return true;
-  } catch (error) {
-    console.log('❌ Erro nas tabs:', error);
-    return false;
-  }
-}
-
-// Função para testar alarms
-async function testAlarms() {
-  console.log('⏰ Testando alarms...');
-  
-  try {
-    await chrome.alarms.create('test-alarm', { when: Date.now() + 1000 });
-    console.log('✅ Alarm criado com sucesso');
-    
-    await chrome.alarms.clear('test-alarm');
-    console.log('✅ Alarm removido com sucesso');
-    
-    return true;
-  } catch (error) {
-    console.log('❌ Erro nos alarms:', error);
-    return false;
-  }
-}
-
-// Função para testar notifications
-async function testNotifications() {
-  console.log('🔔 Testando notifications...');
-  
-  try {
-    await chrome.notifications.create('test-notification', {
-      type: 'basic',
-      iconUrl: 'icons/icon48.png',
-      title: 'Teste de Notificação',
-      message: 'Esta é uma notificação de teste'
-    });
-    console.log('✅ Notificação criada com sucesso');
-    
-    await chrome.notifications.clear('test-notification');
-    console.log('✅ Notificação removida com sucesso');
-    
-    return true;
-  } catch (error) {
-    console.log('❌ Erro nas notifications:', error);
-    return false;
-  }
-}
-
-// Função para verificar estado da extensão
-async function checkExtensionState() {
-  console.log('🔍 Verificando estado da extensão...');
-  
-  try {
-    // Verifica se o service worker está ativo
-    const serviceWorker = chrome.runtime.getManifest();
-    console.log('✅ Service Worker ativo, versão:', serviceWorker.version);
-    
-    // Verifica permissões
-    const permissions = chrome.runtime.getManifest().permissions;
-    console.log('✅ Permissões:', permissions);
-    
-    // Verifica se há erros no console
-    console.log('✅ Extensão carregada sem erros críticos');
-    
-    return true;
-  } catch (error) {
-    console.log('❌ Erro no estado da extensão:', error);
-    return false;
-  }
-}
-
-// Função principal de diagnóstico
-async function runDiagnostics() {
-  console.log('🚀 Iniciando diagnóstico completo...\n');
-  
-  const results = {
-    communication: await testCommunication(),
-    storage: await testStorage(),
-    dnr: await testDNR(),
-    tabs: await testTabs(),
-    alarms: await testAlarms(),
-    notifications: await testNotifications(),
-    extensionState: await checkExtensionState()
+// 4. Test message passing
+async function testMessagePassing() {
+  const testMessage = {
+    type: 'GET_INITIAL_STATE',
+    payload: null,
+    id: 'debug-test-' + Date.now(),
+    ts: Date.now()
   };
   
-  console.log('\n📊 RESULTADOS DO DIAGNÓSTICO:');
-  console.log('==============================');
-  
-  Object.entries(results).forEach(([test, passed]) => {
-    console.log(`${passed ? '✅' : '❌'} ${test}: ${passed ? 'FUNCIONANDO' : 'COM PROBLEMAS'}`);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      console.error('❌ Message timeout after 5 seconds');
+      resolve(null);
+    }, 5000);
+    
+    chrome.runtime.sendMessage(testMessage, (response) => {
+      clearTimeout(timeout);
+      if (chrome.runtime.lastError) {
+        console.error('❌ Message failed:', chrome.runtime.lastError);
+        resolve(null);
+      } else {
+        console.log('📨 Message response:', response);
+        resolve(response);
+      }
+    });
   });
+}
+
+// 5. Check service worker status
+async function checkServiceWorkerStatus() {
+  try {
+    // Try to get service worker info
+    const context = chrome.runtime.getContexts ? await chrome.runtime.getContexts() : null;
+    console.log('🔧 Service worker contexts:', context);
+    
+    // Test if we can communicate with service worker
+    const pingMessage = {
+      type: 'PING',
+      payload: null,
+      id: 'ping-' + Date.now(),
+      ts: Date.now()
+    };
+    
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        console.warn('⚠️ Service worker not responding to ping');
+        resolve({ status: 'unresponsive' });
+      }, 3000);
+      
+      chrome.runtime.sendMessage(pingMessage, (response) => {
+        clearTimeout(timeout);
+        if (chrome.runtime.lastError) {
+          console.error('❌ Service worker error:', chrome.runtime.lastError);
+          resolve({ status: 'error', error: chrome.runtime.lastError });
+        } else {
+          console.log('✅ Service worker responding:', response);
+          resolve({ status: 'active', response });
+        }
+      });
+    });
+  } catch (error) {
+    console.error('❌ Service worker check failed:', error);
+    return { status: 'failed', error };
+  }
+}
+
+// 6. Check permissions
+async function checkPermissions() {
+  const manifest = chrome.runtime.getManifest();
+  const permissions = manifest.permissions || [];
+  const hostPermissions = manifest.host_permissions || [];
   
-  const totalTests = Object.keys(results).length;
-  const passedTests = Object.values(results).filter(Boolean).length;
-  const successRate = (passedTests / totalTests * 100).toFixed(1);
+  console.log('🔐 Permissions:', permissions);
+  console.log('🌐 Host permissions:', hostPermissions);
   
-  console.log(`\n📈 Taxa de sucesso: ${successRate}% (${passedTests}/${totalTests})`);
+  // Check if we have required permissions
+  const requiredPermissions = ['storage', 'tabs', 'alarms', 'notifications', 'declarativeNetRequest', 'scripting'];
+  const missingPermissions = requiredPermissions.filter(p => !permissions.includes(p));
   
-  if (successRate === '100.0') {
-    console.log('🎉 Todos os testes passaram! A extensão deve estar funcionando corretamente.');
-  } else {
-    console.log('⚠️ Alguns testes falharam. Verifique os erros acima para identificar problemas.');
+  if (missingPermissions.length > 0) {
+    console.error('❌ Missing required permissions:', missingPermissions);
   }
   
-  // Salva resultados no storage para referência
-  await chrome.storage.local.set({
-    debugResults: {
-      timestamp: Date.now(),
-      results,
-      successRate: parseFloat(successRate)
+  return {
+    permissions,
+    hostPermissions,
+    missingPermissions
+  };
+}
+
+// 7. Test content script injection
+async function testContentScriptInjection() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs.length === 0) {
+      console.warn('⚠️ No active tab found for content script test');
+      return null;
     }
+    
+    const tab = tabs[0];
+    console.log('📄 Testing content script on tab:', tab.url);
+    
+    // Check if content script is injected
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        return {
+          hasContentScript: !!(window as any).v0ContentScriptInjected,
+          hasGlobal: typeof (window as any).v0ContentScriptInjected !== 'undefined'
+        };
+      }
+    });
+    
+    console.log('📄 Content script status:', result[0]?.result);
+    return result[0]?.result;
+  } catch (error) {
+    console.error('❌ Content script test failed:', error);
+    return null;
+  }
+}
+
+// Main diagnostic function
+async function runFullDiagnostic() {
+  console.log('🚀 Running full extension diagnostic...\n');
+  
+  const results = {};
+  
+  // Run all diagnostics
+  results.extension = await safeExecute('Extension Loaded', checkExtensionLoaded);
+  results.storage = await safeExecute('Storage State', checkStorageState);
+  results.dnr = await safeExecute('DNR Rules', checkDNRRules);
+  results.messages = await safeExecute('Message Passing', testMessagePassing);
+  results.serviceWorker = await safeExecute('Service Worker', checkServiceWorkerStatus);
+  results.permissions = await safeExecute('Permissions', checkPermissions);
+  results.contentScript = await safeExecute('Content Script', testContentScriptInjection);
+  
+  // Summary
+  console.log('\n📊 DIAGNOSTIC SUMMARY:');
+  console.log('========================');
+  
+  const checks = [
+    { name: 'Extension Loaded', result: results.extension },
+    { name: 'Storage State', result: results.storage },
+    { name: 'DNR Rules', result: results.dnr },
+    { name: 'Message Passing', result: results.messages },
+    { name: 'Service Worker', result: results.serviceWorker },
+    { name: 'Permissions', result: results.permissions },
+    { name: 'Content Script', result: results.contentScript }
+  ];
+  
+  checks.forEach(check => {
+    const status = check.result ? '✅' : '❌';
+    console.log(`${status} ${check.name}`);
   });
   
-  console.log('\n💾 Resultados salvos no storage local para referência.');
+  // Specific issues
+  if (results.storage?.missingKeys?.length > 0) {
+    console.log('\n⚠️ STORAGE ISSUES:');
+    console.log('Missing keys:', results.storage.missingKeys);
+  }
   
+  if (results.dnr?.blacklist?.length === 0 && results.storage?.local?.blacklist?.length > 0) {
+    console.log('\n⚠️ DNR ISSUES:');
+    console.log('Blacklist has items but no DNR rules created');
+  }
+  
+  if (!results.messages) {
+    console.log('\n⚠️ COMMUNICATION ISSUES:');
+    console.log('Background not responding to messages');
+  }
+  
+  console.log('\n🏁 Diagnostic complete!');
   return results;
 }
 
-// Executa o diagnóstico
-runDiagnostics().catch(console.error);
-
-// Exporta funções para uso manual
-window.debugExtension = {
-  testCommunication,
-  testStorage,
-  testDNR,
-  testTabs,
-  testAlarms,
-  testNotifications,
-  checkExtensionState,
-  runDiagnostics
-};
-
-console.log('\n🛠️ Funções de debug disponíveis em window.debugExtension');
-console.log('Exemplo: await window.debugExtension.testCommunication()');
+// Auto-run if in browser console
+if (typeof window !== 'undefined') {
+  runFullDiagnostic();
+} else {
+  // Export for manual use
+  (globalThis as any).runExtensionDiagnostic = runFullDiagnostic;
+  console.log('🔧 Diagnostic functions available. Call runExtensionDiagnostic() to start.');
+}

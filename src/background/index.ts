@@ -1,5 +1,7 @@
 // Logs de inicialização bem no topo (aparecem mesmo se algo falhar depois)
 console.log("[v0] Service Worker starting up...");
+console.log("[v0] DEBUG: Extension version:", chrome.runtime.getManifest().version);
+console.log("[v0] DEBUG: Manifest permissions:", chrome.runtime.getManifest().permissions);
 
 import { initializePomodoro } from "./modules/pomodoro";
 import {
@@ -19,46 +21,62 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_POMODORO_CONFIG,
 } from "../shared/constants";
-import type { AppState, PomodoroState } from "../shared/types";
+import type { AppState } from "../shared/types";
 
 /** Bootstrap de todos os módulos do SW */
 async function bootstrap() {
+  console.log("[v0] DEBUG: Starting bootstrap process...");
+  
   try {
+    console.log("[v0] DEBUG: Initializing Pomodoro module...");
     await initializePomodoro();
+    console.log("[v0] DEBUG: ✅ Pomodoro module initialized successfully");
   } catch (e) {
     console.error("[v0] Failed to initialize Pomodoro:", e);
   }
 
   try {
+    console.log("[v0] DEBUG: Initializing Blocker module...");
     await initializeBlocker();
+    console.log("[v0] DEBUG: ✅ Blocker module initialized successfully");
   } catch (e) {
     console.error("[v0] Failed to initialize Blocker:", e);
   }
 
   try {
+    console.log("[v0] DEBUG: Initializing Usage Tracker module...");
     await initializeUsageTracker();
+    console.log("[v0] DEBUG: ✅ Usage Tracker module initialized successfully");
   } catch (e) {
     console.error("[v0] Failed to initialize Usage Tracker:", e);
   }
 
   try {
+    console.log("[v0] DEBUG: Initializing Daily Sync module...");
     await initializeDailySync();
+    console.log("[v0] DEBUG: ✅ Daily Sync module initialized successfully");
   } catch (e) {
     console.error("[v0] Failed to initialize Daily Sync:", e);
   }
 
   try {
+    console.log("[v0] DEBUG: Initializing Content Analyzer module...");
     await initializeContentAnalyzer();
+    console.log("[v0] DEBUG: ✅ Content Analyzer module initialized successfully");
   } catch (e) {
     console.error("[v0] Failed to initialize Content Analyzer:", e);
   }
 
   try {
+    console.log("[v0] DEBUG: Initializing Firebase Sync module...");
     await initializeFirebaseSync();
+    console.log("[v0] DEBUG: ✅ Firebase Sync module initialized successfully");
   } catch (e) {
     // Firebase é opcional: apenas log
     console.warn("[v0] Firebase sync skipped/failed:", e);
   }
+  
+  console.log("[v0] DEBUG: Bootstrap process completed");
 }
 
 /**
@@ -127,45 +145,65 @@ function handleInstalled(details: chrome.runtime.InstalledDetails) {
 
 async function initializeExtension(details: chrome.runtime.InstalledDetails) {
   console.log("[v0] Extension installed/updated:", details.reason);
+  console.log("[v0] DEBUG: Installation reason:", details.reason);
 
   // CLEANUP OLD RULES FIRST - prevents orphaned rules from interfering
   try {
+    console.log("[v0] DEBUG: Cleaning up old DNR rules...");
     await cleanupAllDNRRules();
+    console.log("[v0] DEBUG: ✅ DNR cleanup completed");
   } catch (e) {
     console.error("[v0] Failed to cleanup DNR rules:", e);
   }
 
   if (details.reason === "install") {
+    console.log("[v0] DEBUG: First installation - creating initial state...");
+    
     // Estado inicial completo
+    const today = new Date().toISOString().split('T')[0];
     const initialState: AppState = {
+      isLoading: false,
+      error: null,
       blacklist: [], // Garantir que é array
       timeLimits: [], // Garantir que é array
       dailyUsage: {
-        [new Date().toISOString().split('T')[0]]: {} // Inicializar com data atual
+        [today]: {
+          date: today,
+          totalMinutes: 0,
+          perDomain: {}
+        }
       },
       siteCustomizations: {},
+      pomodoro: {
+        config: DEFAULT_POMODORO_CONFIG,
+        state: {
+          phase: "idle",
+          isPaused: false,
+          cycleIndex: 0,
+          remainingMs: 0,
+        }
+      },
       settings: DEFAULT_SETTINGS,
     };
 
-    const initialPomodoroStatus: PomodoroState = {
-      phase: "idle",
-      isPaused: false,
-      cycleIndex: 0,
-      remainingMs: 0,
-    };
+    console.log("[v0] DEBUG: Initial state object:", initialState);
 
     try {
+      console.log("[v0] DEBUG: Writing to chrome.storage.local...");
       await chrome.storage.local.set({
         [STORAGE_KEYS.BLACKLIST]: initialState.blacklist,
         [STORAGE_KEYS.TIME_LIMITS]: initialState.timeLimits,
         [STORAGE_KEYS.DAILY_USAGE]: initialState.dailyUsage,
         [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: initialState.siteCustomizations,
-  [STORAGE_KEYS.POMODORO_STATUS]: { config: DEFAULT_POMODORO_CONFIG, state: initialPomodoroStatus },
+        [STORAGE_KEYS.POMODORO_STATUS]: initialState.pomodoro,
       });
+      console.log("[v0] DEBUG: ✅ Local storage written successfully");
 
+      console.log("[v0] DEBUG: Writing to chrome.storage.sync...");
       await chrome.storage.sync.set({
         [STORAGE_KEYS.SETTINGS]: initialState.settings,
       });
+      console.log("[v0] DEBUG: ✅ Sync storage written successfully");
 
       console.log("[v0] Initial state created");
     } catch (e) {
@@ -173,16 +211,20 @@ async function initializeExtension(details: chrome.runtime.InstalledDetails) {
     }
 
     // Instalação: injeta content.js nas abas já abertas
+    console.log("[v0] DEBUG: Injecting content scripts into existing tabs...");
     await injectContentScriptIntoAllTabs();
   }
 
   if (details.reason === "update") {
+    console.log("[v0] DEBUG: Extension update - re-injecting content scripts...");
     // Atualização: re-injeta para evitar "Receiving end does not exist"
     await injectContentScriptIntoAllTabs();
   }
 
   // Inicializa módulos em ambos os casos
+  console.log("[v0] DEBUG: Starting module initialization...");
   await bootstrap();
+  console.log("[v0] DEBUG: ✅ Extension initialization completed");
 }
 
 // Expose debug functions globally for console testing
@@ -194,6 +236,35 @@ async function initializeExtension(details: chrome.runtime.InstalledDetails) {
 (globalThis as any).cleanupDNR = async () => {
   const { cleanupAllDNRRules } = await import("./modules/blocker");
   await cleanupAllDNRRules();
+};
+
+(globalThis as any).verifyDNRRules = async () => {
+  const dynamic = await chrome.declarativeNetRequest.getDynamicRules();
+  const session = await chrome.declarativeNetRequest.getSessionRules();
+  
+  console.log("=== DNR Rules Verification ===");
+  console.log("Dynamic rules:", dynamic.length);
+  console.log("Session rules:", session.length);
+  console.log("\nDynamic rules detail:", dynamic);
+  console.log("\nSession rules detail:", session);
+  
+  // Test if a specific URL would be blocked
+  const testUrl = "https://www.youtube.com/";
+  const matching = dynamic.filter(rule => {
+    if (rule.condition.regexFilter) {
+      try {
+        const regex = new RegExp(rule.condition.regexFilter);
+        return regex.test(testUrl);
+      } catch (e) {
+        console.error("Invalid regex in rule", rule.id, e);
+        return false;
+      }
+    }
+    return false;
+  });
+  
+  console.log(`\nRules matching ${testUrl}:`, matching);
+  return { dynamic, session, matching };
 };
 
 /** onStartup: re-inicializa módulos (navegador aberto) */
@@ -219,10 +290,16 @@ function initializeListeners() {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       console.log("[v0] Message received:", message?.type, message?.payload);
+      console.log("[v0] DEBUG: Message sender:", sender);
+      console.log("[v0] DEBUG: Message ID:", message?.id);
+      console.log("[v0] DEBUG: Message timestamp:", message?.ts);
 
       // handleMessage já retorna uma Promise; garantimos resposta assíncrona
       Promise.resolve(handleMessage(message, sender))
-        .then((res) => sendResponse(res))
+        .then((res) => {
+          console.log("[v0] DEBUG: Message response:", res);
+          sendResponse(res);
+        })
         .catch((err) => {
           console.error("[v0] Error handling message:", err);
           sendResponse({ error: err?.message ?? String(err) });

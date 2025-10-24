@@ -2,7 +2,7 @@ import { STORAGE_KEYS } from "../../shared/constants";
 import type { BlacklistEntry, Domain } from "../../shared/types";
 import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain } from "../../shared/url";
-import { createDomainRegexPattern } from "../../shared/regex-utils";
+import { createDomainRegexPattern, validateDNRRegex } from "../../shared/regex-utils";
 import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
 
 const POMODORO_RULE_ID_START = 1000;
@@ -187,12 +187,18 @@ export async function removeFromBlacklist(domain: string) {
 
 // ---- Sincroniza APENAS as regras da blacklist do usuário (range 2000..2999) ----
 async function syncUserBlacklistRules() {
+  console.log("[v0] DEBUG: Starting syncUserBlacklistRules...");
+  
   const { [STORAGE_KEYS.BLACKLIST]: blacklist = [] } = await chrome.storage.local.get(
     STORAGE_KEYS.BLACKLIST
   );
+  
+  console.log("[v0] DEBUG: Blacklist from storage:", blacklist);
 
   return withDnrLock(async () => {
+    console.log("[v0] DEBUG: Getting existing DNR rules...");
     const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
+    console.log("[v0] DEBUG: Found", existingRules.length, "existing DNR rules");
 
     // IDs já usados pela blacklist do usuário
     const existingUserRuleIds = new Set(
@@ -246,7 +252,14 @@ async function syncUserBlacklistRules() {
       if (!existingUserRuleIds.has(id)) {
         // Usa regexFilter para casar tanto domínio raiz quanto subdomínios em http/https
         const regex = createDomainRegexPattern(d);
-        console.log('[v0] [DEBUG] Regex pattern for', d, ':', regex);
+        const validation = validateDNRRegex(regex);
+        
+        if (!validation.valid) {
+          console.error(`[v0] Invalid DNR regex for ${d}:`, validation.error);
+          continue; // Skip this domain
+        }
+        
+        console.log('[v0] [DEBUG] Valid regex pattern for', d, ':', regex);
         rulesToAdd.push({
           id,
           priority: 1,
@@ -267,6 +280,9 @@ async function syncUserBlacklistRules() {
       (id) => !finalRuleIds.has(id)
     );
 
+    console.log("[v0] DEBUG: Rules to add:", rulesToAdd.length);
+    console.log("[v0] DEBUG: Rules to remove:", rulesToRemove.length);
+    
     if (rulesToAdd.length > 0 || rulesToRemove.length > 0) {
       const debugEnabled = await isDNRDebugEnabled();
       if (debugEnabled) {
@@ -279,10 +295,35 @@ async function syncUserBlacklistRules() {
         console.log("[DNR-DEBUG] Rules to remove IDs:", rulesToRemove);
       }
       
-      await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: rulesToRemove,
-        addRules: rulesToAdd,
-      });
+      console.log("[v0] DEBUG: Updating DNR rules...");
+      try {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+          removeRuleIds: rulesToRemove,
+          addRules: rulesToAdd,
+        });
+        console.log("[v0] DEBUG: DNR rules successfully applied");
+        
+        // Verify rules were actually added
+        const currentRules = await chrome.declarativeNetRequest.getDynamicRules();
+        console.log("[v0] DEBUG: Current DNR rules count:", currentRules.length);
+        console.log("[v0] DEBUG: Current DNR rules:", currentRules);
+      } catch (error) {
+        console.error("[v0] ERROR: DNR updateDynamicRules FAILED:", error);
+        console.error("[v0] ERROR: Failed rules:", rulesToAdd);
+        console.error("[v0] ERROR: Attempted to remove:", rulesToRemove);
+        throw error; // Re-throw to maintain existing error handling
+      }
+      
+      // Verify rules were actually added
+      const verification = await chrome.declarativeNetRequest.getDynamicRules();
+      const userRules = verification.filter(r => r.id >= USER_BLACKLIST_RULE_ID_START && r.id < USER_BLACKLIST_RULE_ID_START + USER_BLACKLIST_RANGE);
+      const pomodoroRules = verification.filter(r => r.id >= POMODORO_RULE_ID_START && r.id < USER_BLACKLIST_RULE_ID_START);
+
+      console.log(`[v0] DNR Verification: ${userRules.length} blacklist rules, ${pomodoroRules.length} pomodoro rules`);
+
+      if (rulesToAdd.length > 0 && userRules.length === 0) {
+        console.error("[v0] CRITICAL: Rules were added but not found in DNR!");
+      }
       
       if (debugEnabled) {
         const allRules = await chrome.declarativeNetRequest.getDynamicRules();
