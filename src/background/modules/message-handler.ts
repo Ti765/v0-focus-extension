@@ -42,8 +42,10 @@ export async function notifyStateUpdate() {
       const ignorablePrefixes = [
         "Receiving end does not exist",
         "The message port closed before a response was received",
+        "Could not establish connection. Receiving end does not exist",
       ];
       const isIgnorable = ignorablePrefixes.some((p) => errMsg === p || errMsg.startsWith(p));
+      // Only warn if there's an error AND it's NOT one of the expected "no receiver" errors
       if (err && !isIgnorable) {
         console.warn("[v0] notifyStateUpdate lastError:", err.message);
       }

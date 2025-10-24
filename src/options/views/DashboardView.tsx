@@ -1,13 +1,22 @@
-import { useStore } from "../../popup/store";
+import { useStoreShallow, useStore } from "../../popup/store";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, ChartOptions } from "chart.js";
 import { Pie, Bar, Line } from "react-chartjs-2";
+import { useEffect } from "react";
 
 // Registra todos os componentes necessários do Chart.js
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title);
 
 export default function DashboardView() {
   // subscribe only to dailyUsage to avoid re-renders on unrelated state changes
-  const dailyUsage = useStore((s: any) => s.dailyUsage ?? {});
+  const dailyUsage = useStoreShallow((s) => s.dailyUsage ?? {});
+  
+  // Load initial state and listen for updates
+  useEffect(() => {
+    const s = useStore.getState();
+    s.loadState();
+    const unsubscribe = s.listenForUpdates();
+    return unsubscribe;
+  }, []);
   // --- PREPARAÇÃO DOS DADOS ---
   const today = new Date().toISOString().split("T")[0];
   const todayData = (dailyUsage?.[today] && dailyUsage[today].perDomain) || {};

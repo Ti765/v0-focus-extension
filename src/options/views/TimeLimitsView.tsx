@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, Clock } from "lucide-react";
 import type { TimeLimitEntry } from "../../shared/types";
 import { normalizeDomain } from "../../shared/url";
-import { useStore } from "../../popup/store"; // mantém a mesma store do popup
+import { useStoreShallow } from "../../popup/store"; // mantém a mesma store do popup
 
 // Usa o store compartilhado do popup para todas as mensagens/ações
 
 export default function TimeLimitsView() {
   // consome estado e utilitários do store (para refletir updates do SW)
-  const { timeLimits, loadState, listenForUpdates, setTimeLimit, error, setError } = useStore((s) => ({
+  const { timeLimits, loadState, listenForUpdates, setTimeLimit, error, setError } = useStoreShallow((s) => ({
     timeLimits: s.timeLimits,
     loadState: s.loadState,
     listenForUpdates: s.listenForUpdates,

@@ -42,7 +42,7 @@ export default function PomodoroTimer() {
     }, 250); // Atualiza 4x por segundo para ser mais preciso
 
     return () => clearInterval(interval);
-  }, [pomodoro?.state?.phase, pomodoro?.state?.startedAt, pomodoro?.state?.remainingMs]);
+  }, [pomodoro?.state?.phase, pomodoro?.state?.startedAt, pomodoro?.state?.remainingMs, focusMinutes]);
 
   const handleStart = () => {
     startPomodoro(focusMinutes, breakMinutes);

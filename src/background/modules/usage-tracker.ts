@@ -24,6 +24,10 @@ function generateLimitRuleId(domain: string): number {
   return LIMIT_RULE_BASE + offset;
 }
 
+function escapeForRegex(domain: string): string {
+  return domain.replace(/[+?^${}()|[\]\\\.-]/g, "\\$&");
+}
+
 // ---- Agendamento diário: limpar regras de sessão (reseta bloqueios de limite de tempo) ----
 export async function initializeDailySync() {
   if (dailySyncInitialized) return;
@@ -221,20 +225,27 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
     const ruleId = generateLimitRuleId(domain);
 
     try {
+      const regex = `^https?:\\/\\/([^\\/]+\\.)?${escapeForRegex(domain)}(\\/|$)`;
+      const rule = {
+        id: ruleId,
+        priority: 3,
+        action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
+        condition: {
+          regexFilter: regex,
+          isUrlFilterCaseSensitive: false,
+          resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
+        },
+      };
+      
+      console.log("[v0] [DEBUG] Time limit rule to add:", JSON.stringify(rule, null, 2));
+      
       await chrome.declarativeNetRequest.updateSessionRules({
         removeRuleIds: [ruleId], // remove se já existir
-        addRules: [
-          {
-            id: ruleId,
-            priority: 3,
-            action: { type: chrome.declarativeNetRequest.RuleActionType.BLOCK },
-            condition: {
-              urlFilter: `||${domain}`,
-              resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-            },
-          },
-        ],
+        addRules: [rule],
       });
+      
+      const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
+      console.log("[v0] [DEBUG] All session rules after time limit:", JSON.stringify(sessionRules, null, 2));
 
       console.log(
         `[v0] Time limit reached for ${domain}. Session block rule ${ruleId} added.`

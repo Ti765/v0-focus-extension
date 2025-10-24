@@ -3,6 +3,11 @@ import type { BlacklistEntry, Domain } from "../../shared/types";
 import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain } from "../../shared/url";
 
+function escapeForRegex(domain: string): string {
+  // Escapa pontos e traços para uso seguro no regex da URL
+  return domain.replace(/[+?^${}()|[\]\\\.-]/g, "\\$&");
+}
+
 const POMODORO_RULE_ID_START = 1000;
 const USER_BLACKLIST_RULE_ID_START = 2000;
 const USER_BLACKLIST_RANGE = 1000; // IDs 2000..2999 reservados para a blacklist do usuário
@@ -158,6 +163,8 @@ async function syncUserBlacklistRules() {
 
       // Adiciona a regra se esse ID ainda não existe atualmente
       if (!existingUserRuleIds.has(id)) {
+        // Usa regexFilter para casar tanto domínio raiz quanto subdomínios em http/https
+        const regex = `^https?:\\/\\/([^\\/]+\\.)?${escapeForRegex(d)}(\\/|$)`;
         rulesToAdd.push({
           id,
           priority: 1,
@@ -165,10 +172,9 @@ async function syncUserBlacklistRules() {
             type: chrome.declarativeNetRequest.RuleActionType.BLOCK,
           },
           condition: {
-            urlFilter: `||${d}`,
-            resourceTypes: [
-              chrome.declarativeNetRequest.ResourceType.MAIN_FRAME,
-            ],
+            regexFilter: regex,
+            isUrlFilterCaseSensitive: false,
+            resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
           },
         });
       }
@@ -180,10 +186,19 @@ async function syncUserBlacklistRules() {
     );
 
     if (rulesToAdd.length > 0 || rulesToRemove.length > 0) {
+      // Log detalhado das regras antes de adicionar
+      console.log("[v0] [DEBUG] Rules to add:", JSON.stringify(rulesToAdd, null, 2));
+      console.log("[v0] [DEBUG] Rules to remove:", rulesToRemove);
+      
       await chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: rulesToRemove,
         addRules: rulesToAdd,
       });
+      
+      // Verifica as regras após adicionar
+      const allRules = await chrome.declarativeNetRequest.getDynamicRules();
+      console.log("[v0] [DEBUG] All dynamic rules after sync:", JSON.stringify(allRules, null, 2));
+      
       console.log(
         "[v0] User blocking rules synced:",
         rulesToAdd.length,
@@ -211,6 +226,7 @@ export async function enablePomodoroBlocking() {
   const pomodoroRules: chrome.declarativeNetRequest.Rule[] = (blacklist as BlacklistEntry[]).map(
     (entry, index) => {
       const d = normalizeDomain(entry.domain);
+      const regex = `^https?:\\/\\/([^\\/]+\\.)?${escapeForRegex(d)}(\\/|$)`;
       return {
         id: POMODORO_RULE_ID_START + index, // sequência simples e previsível
         priority: 2, // acima das regras de usuário
@@ -218,10 +234,10 @@ export async function enablePomodoroBlocking() {
           type: chrome.declarativeNetRequest.RuleActionType.BLOCK,
         },
         condition: {
-          urlFilter: `||${d}`,
-          resourceTypes: [
-            chrome.declarativeNetRequest.ResourceType.MAIN_FRAME,
-          ],
+          // Bloqueia navegações para o domínio (e subdomínios)
+          regexFilter: regex,
+          isUrlFilterCaseSensitive: false,
+          resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
         },
       } as chrome.declarativeNetRequest.Rule;
     }
@@ -233,10 +249,15 @@ export async function enablePomodoroBlocking() {
       .map((r) => r.id)
       .filter((id) => id >= POMODORO_RULE_ID_START && id < USER_BLACKLIST_RULE_ID_START);
 
+    console.log("[v0] [DEBUG] Pomodoro rules to add:", JSON.stringify(pomodoroRules, null, 2));
+    
     await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: oldPomodoroIds,
       addRules: pomodoroRules,
     });
+    
+    const allRules = await chrome.declarativeNetRequest.getDynamicRules();
+    console.log("[v0] [DEBUG] All dynamic rules after Pomodoro enable:", JSON.stringify(allRules, null, 2));
 
     console.log(
       "[v0] Enabling Pomodoro blocking for",
