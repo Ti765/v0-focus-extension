@@ -8,8 +8,6 @@ import { notificationsAllowed } from "./message-handler";
  * para evitar múltiplas notificações repetidas.
  */
 const NOTIFY_CACHE_KEY = "__contentSuggestNotified__";
-// Janela de supressão de notificações (em ms). Ex.: 3 horas.
-const NOTIFY_SUPPRESS_MS = 3 * 60 * 60 * 1000;
 
 export async function initializeContentAnalyzer() {
   console.log("[v0] Initializing content analyzer module");
@@ -39,6 +37,11 @@ export async function initializeContentAnalyzer() {
  */
 async function shouldNotifyDomain(domain: string): Promise<boolean> {
   try {
+    // Get configurable suppression window from settings
+    const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+    const suppressionMinutes = settings?.contentAnalysisSuppressionMinutes || 30;
+    const NOTIFY_SUPPRESS_MS = suppressionMinutes * 60 * 1000;
+    
     const { [NOTIFY_CACHE_KEY]: cache = {} } = await chrome.storage.session.get(NOTIFY_CACHE_KEY);
     const last = cache?.[domain] as number | undefined;
     const now = Date.now();

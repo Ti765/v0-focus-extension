@@ -22,15 +22,23 @@ export default function PomodoroTimer() {
       return;
     }
 
-    // Simplesmente use o remainingMs do estado (backend é source of truth)
-    // Atualiza a cada segundo para dar feedback visual
+    // Calculate remaining time from endsAt timestamp for accuracy
     const interval = setInterval(() => {
-      const currentRemaining = Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000);
-      setDisplayTime(Math.max(0, currentRemaining));
+      if (pomodoro?.state?.endsAt) {
+        const now = new Date();
+        const endsAt = new Date(pomodoro.state.endsAt);
+        const remainingMs = Math.max(0, endsAt.getTime() - now.getTime());
+        const currentRemaining = Math.ceil(remainingMs / 1000);
+        setDisplayTime(Math.max(0, currentRemaining));
+      } else {
+        // Fallback to remainingMs if endsAt is not available
+        const currentRemaining = Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000);
+        setDisplayTime(Math.max(0, currentRemaining));
+      }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [pomodoro?.state?.phase, pomodoro?.state?.remainingMs, focusMinutes]);
+  }, [pomodoro?.state?.phase, pomodoro?.state?.endsAt, pomodoro?.state?.remainingMs, focusMinutes]);
 
   const handleStart = () => {
     startPomodoro(focusMinutes, breakMinutes);

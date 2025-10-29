@@ -173,7 +173,20 @@ async function initializeExtension(details: chrome.runtime.InstalledDetails) {
           perDomain: {}
         }
       },
-      siteCustomizations: {},
+      siteCustomizations: {
+        "youtube.com": {
+          selectorsToRemove: [
+            "#secondary", "#related", "#comments", "#sections", "#chips",
+            "#masthead-container", "#player-ads", "#merch-shelf",
+            "#engagement-panel", "#watch-discussion", "#watch-description",
+            "#watch7-sidebar-contents", "#watch7-sidebar-modules",
+            "ytd-reel-shelf-renderer", "ytd-shorts", "ytd-compact-video-renderer",
+            "ytd-video-secondary-info-renderer", "ytd-video-primary-info-renderer",
+            "#dismissible", "#dismissed", "#dismissed-content",
+            "ytd-item-section-renderer", "ytd-shelf-renderer"
+          ]
+        }
+      },
       pomodoro: {
         config: DEFAULT_POMODORO_CONFIG,
         state: {

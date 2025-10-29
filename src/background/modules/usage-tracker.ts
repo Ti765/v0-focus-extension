@@ -5,8 +5,8 @@ import { normalizeDomain, extractDomain } from "../../shared/url";
 import { createDomainUrlFilter } from "../../shared/regex-utils";
 import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
 
-// Flag de debug para logs detalhados do tracking (separate from DNR)
-const DEBUG_TRACKING = true;
+// Import debug configuration
+import { isTrackingDebugEnabledSync } from "../../shared/debug-config";
 
 // --- Estado interno ---
 let activeTabId: number | null = null;
@@ -162,9 +162,11 @@ async function startTrackingTab(tabId: number | undefined, url: string | undefin
   }
 
   activeTabId = tabId;
+  const now = Date.now();
   const trackingInfo = {
     url,
-    startTime: Date.now(),
+    startTime: now,
+    lastUpdate: now, // Track last update for gap detection
   };
   await chrome.storage.session.set({ [STORAGE_KEYS.CURRENTLY_TRACKING]: trackingInfo });
 }
@@ -180,7 +182,7 @@ async function recordActiveTabUsage() {
   const trackingInfo = result[STORAGE_KEYS.CURRENTLY_TRACKING];
 
   if (!trackingInfo || !trackingInfo.url || !trackingInfo.startTime) {
-    if (DEBUG_TRACKING) {
+    if (isTrackingDebugEnabledSync()) {
       console.log("[TRACKING-DEBUG] No active tracking info:", { trackingInfo });
     }
     return;
@@ -188,31 +190,52 @@ async function recordActiveTabUsage() {
 
   const domain = extractDomain(trackingInfo.url);
   if (!domain) {
-    if (DEBUG_TRACKING) {
+    if (isTrackingDebugEnabledSync()) {
       console.log("[TRACKING-DEBUG] Invalid domain from URL:", { url: trackingInfo.url });
     }
     await stopTracking();
     return;
   }
 
-  const timeSpent = Math.floor((Date.now() - trackingInfo.startTime) / 1000);
+  const now = Date.now();
+  const timeSpent = Math.floor((now - trackingInfo.startTime) / 1000);
+  
+  // Check for gaps in tracking (service worker restarts)
+  const lastUpdate = trackingInfo.lastUpdate || trackingInfo.startTime;
+  const gapMs = now - lastUpdate;
+  const maxGapMs = USAGE_TRACKER_INTERVAL * 60 * 1000 * 2; // 2x the interval
+  
+  if (gapMs > maxGapMs) {
+    if (isTrackingDebugEnabledSync()) {
+      console.log("[TRACKING-DEBUG] Detected tracking gap:", {
+        gapMs: Math.floor(gapMs / 1000),
+        maxGapMs: Math.floor(maxGapMs / 1000),
+        domain,
+        url: trackingInfo.url
+      });
+    }
+    // Reset start time to avoid recording excessive time
+    trackingInfo.startTime = now - (USAGE_TRACKER_INTERVAL * 60 * 1000);
+  }
 
-  if (DEBUG_TRACKING) {
+  if (isTrackingDebugEnabledSync()) {
     console.log("[TRACKING-DEBUG] Recording usage:", {
       domain,
       timeSpent,
       url: trackingInfo.url,
       startTime: new Date(trackingInfo.startTime).toISOString(),
-      endTime: new Date().toISOString()
+      endTime: new Date().toISOString(),
+      gapDetected: gapMs > maxGapMs
     });
   }
 
-  // reinicia período
-  trackingInfo.startTime = Date.now();
+  // Update tracking info
+  trackingInfo.startTime = now;
+  trackingInfo.lastUpdate = now;
   await chrome.storage.session.set({ [STORAGE_KEYS.CURRENTLY_TRACKING]: trackingInfo });
 
   if (timeSpent < 1) {
-    if (DEBUG_TRACKING) {
+    if (isTrackingDebugEnabledSync()) {
       console.log("[TRACKING-DEBUG] Skipping record, time spent < 1s");
     }
     return;
@@ -223,16 +246,25 @@ async function recordActiveTabUsage() {
     STORAGE_KEYS.DAILY_USAGE
   );
   
-  // Garante que temos uma estrutura para o dia atual
+  // Garante que temos uma estrutura para o dia atual com perDomain
   const dailyUsage = {
     ...existingUsage,
-    [today]: existingUsage[today] || {}
+    [today]: existingUsage[today] || {
+      date: today,
+      totalMinutes: 0,
+      perDomain: {}
+    }
   };
 
-  if (!dailyUsage[today]) {
-    dailyUsage[today] = {};
+  if (!dailyUsage[today].perDomain) {
+    dailyUsage[today].perDomain = {};
   }
-  dailyUsage[today][domain] = (dailyUsage[today][domain] || 0) + timeSpent;
+  
+  // Update perDomain tracking
+  dailyUsage[today].perDomain[domain] = (dailyUsage[today].perDomain[domain] || 0) + timeSpent;
+  
+  // Update total minutes for the day
+  dailyUsage[today].totalMinutes = Object.values(dailyUsage[today].perDomain).reduce((sum: number, time: any) => sum + time, 0) / 60;
 
   await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
 
@@ -241,12 +273,12 @@ async function recordActiveTabUsage() {
   await notifyStateUpdate();
 
   // aplica/atualiza bloqueio por limite de tempo, se necessário
-  await checkTimeLimit(domain, dailyUsage[today][domain]);
+  await checkTimeLimit(domain, dailyUsage[today].perDomain[domain]);
 }
 
 // ---- Verifica limite e aplica regra de sessão se excedido ----
 async function checkTimeLimit(domain: string, totalSecondsToday: number) {
-  const { [STORAGE_KEYS.TIME_LIMITS]: existingLimits } = await chrome.storage.local.get(
+  const { [STORAGE_KEYS.TIME_LIMITS]: existingLimits = [] } = await chrome.storage.local.get(
     STORAGE_KEYS.TIME_LIMITS
   );
   const timeLimits = Array.isArray(existingLimits) ? existingLimits : [];
@@ -259,7 +291,7 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
     const ruleId = generateLimitRuleId(domain);
 
     try {
-        if (DEBUG_TRACKING) {
+        if (isTrackingDebugEnabledSync()) {
           console.log("[TRACKING-DEBUG] Time limit check:", {
             domain,
             totalSecondsToday,
@@ -271,9 +303,35 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
 
         const urlFilter = createDomainUrlFilter(domain);
         const blockedPageUrl = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(domain)}`);
+        
+        // Debug logging for rule creation
+        console.log("[v0] Time limit rule debug:", {
+          domain,
+          urlFilter,
+          blockedPageUrl,
+          ruleId,
+          totalSecondsToday,
+          limitSeconds,
+          redirectUrl: blockedPageUrl
+        });
+        
+        // Verify the blocked page URL is valid
+        try {
+          const testUrl = new URL(blockedPageUrl);
+          console.log("[v0] Blocked page URL validation:", {
+            isValid: true,
+            protocol: testUrl.protocol,
+            hostname: testUrl.hostname,
+            pathname: testUrl.pathname,
+            search: testUrl.search
+          });
+        } catch (error) {
+          console.error("[v0] Invalid blocked page URL:", blockedPageUrl, error);
+        }
+        
         const rule = {
           id: ruleId,
-          priority: 3,
+          priority: 10, // Increased from 3 to 10 to ensure it overrides other rules
           action: { 
             type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
             redirect: {
@@ -302,12 +360,20 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           addRules: [rule],
         });
         
+        // Always log session rules after creation for debugging
+        const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
+        console.log("[v0] Session rules after time limit rule creation:", {
+          totalRules: sessionRules.length,
+          timeLimitRule: sessionRules.find(r => r.id === ruleId),
+          allRuleIds: sessionRules.map(r => r.id)
+        });
+        
         if (debugEnabled) {
-          const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
           console.log("[DNR-DEBUG] All session rules after time limit:", sessionRules);
           console.log("[DNR-DEBUG] Session rules by domain:", sessionRules.map(r => ({
             id: r.id,
-            urlFilter: r.condition.urlFilter || r.condition.regexFilter
+            urlFilter: r.condition.urlFilter || r.condition.regexFilter,
+            priority: r.priority
           })));
         }
 
@@ -356,7 +422,7 @@ export async function setTimeLimit(domain: string, limitMinutes: number) {
     const { [STORAGE_KEYS.DAILY_USAGE]: dailyUsage = {} } = await chrome.storage.local.get(
       STORAGE_KEYS.DAILY_USAGE
     );
-    const used = dailyUsage?.[today]?.[normalizedDomain] || 0;
+    const used = dailyUsage?.[today]?.perDomain?.[normalizedDomain] || 0;
 
     if (used >= limitMinutes * 60) {
       await checkTimeLimit(normalizedDomain, used);

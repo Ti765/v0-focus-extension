@@ -31,14 +31,24 @@ export const DEFAULT_SETTINGS: UserSettings = {
   language: "pt-BR",
   telemetry: false,
   debugDNR: false, // Default to false for production
+  debugTracking: false, // Debug usage tracking
+  debugContentAnalysis: false, // Debug content analysis
+  debugPomodoro: false, // Debug Pomodoro timer
+  debugZenMode: false, // Debug Zen Mode
   productiveKeywords: [
-    "tutorial", "documentation", "study", "learn", "course",
-    "education", "research", "guide", "reference", "manual",
+    "tutorial", "documentation", "study", "learn", "course", "education", "research", 
+    "guide", "reference", "manual", "academic", "scholarly", "textbook", "lecture",
+    "workshop", "seminar", "training", "skill", "development", "programming", "coding",
+    "technical", "professional", "business", "finance", "economics", "science", "math"
   ],
   distractingKeywords: [
-    "news", "entertainment", "game", "social", "video",
-    "trending", "viral", "celebrity", "gossip", "meme",
+    "news", "entertainment", "game", "social", "video", "trending", "viral", 
+    "celebrity", "gossip", "meme", "funny", "joke", "comedy", "music", "movie",
+    "sports", "gaming", "shopping", "fashion", "beauty", "lifestyle", "travel",
+    "food", "recipe", "cooking", "diy", "craft", "art", "design", "photography"
   ],
+  // Configurable suppression window (in minutes)
+  contentAnalysisSuppressionMinutes: 30, // Default 30 minutes for testing
   // Backward compat
   analyticsConsent: false,
   notificationsEnabled: true,
@@ -57,5 +67,5 @@ export const DEFAULT_POMODORO_CONFIG = {
 export const CONTENT_ANALYSIS_THRESHOLD = 0.5; // Limite de 50% para considerar distrativo
 export const MAX_TEXT_LENGTH = 10000; // Analisar os primeiros 10000 caracteres
 
-// Intervalo do rastreador de uso em minutos
-export const USAGE_TRACKER_INTERVAL = 1;
+// Intervalo do rastreador de uso em minutos (reduzido para melhor consistência)
+export const USAGE_TRACKER_INTERVAL = 0.5; // 30 segundos

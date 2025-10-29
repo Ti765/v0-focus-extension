@@ -8,18 +8,30 @@ import type { UserSettings } from "./types";
  */
 export async function getDebugConfig(): Promise<{
   debugDNR: boolean;
+  debugTracking: boolean;
+  debugContentAnalysis: boolean;
+  debugPomodoro: boolean;
+  debugZenMode: boolean;
 }> {
   try {
-    const settings = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+    const settings = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
     const userSettings = (settings[STORAGE_KEYS.SETTINGS] as UserSettings) || DEFAULT_SETTINGS;
     
     return {
       debugDNR: userSettings.debugDNR ?? DEFAULT_SETTINGS.debugDNR ?? false,
+      debugTracking: userSettings.debugTracking ?? DEFAULT_SETTINGS.debugTracking ?? false,
+      debugContentAnalysis: userSettings.debugContentAnalysis ?? DEFAULT_SETTINGS.debugContentAnalysis ?? false,
+      debugPomodoro: userSettings.debugPomodoro ?? DEFAULT_SETTINGS.debugPomodoro ?? false,
+      debugZenMode: userSettings.debugZenMode ?? DEFAULT_SETTINGS.debugZenMode ?? false,
     };
   } catch (error) {
     console.warn("[v0] Failed to read debug config from storage, using defaults:", error);
     return {
       debugDNR: false,
+      debugTracking: false,
+      debugContentAnalysis: false,
+      debugPomodoro: false,
+      debugZenMode: false,
     };
   }
 }
@@ -38,12 +50,30 @@ export async function isDNRDebugEnabled(): Promise<boolean> {
  * Use this when you need immediate access without async overhead
  * Call updateDebugConfigCache() to refresh the cache
  */
-let debugConfigCache: { debugDNR: boolean } | null = null;
+let debugConfigCache: {
+  debugDNR: boolean;
+  debugTracking: boolean;
+  debugContentAnalysis: boolean;
+  debugPomodoro: boolean;
+  debugZenMode: boolean;
+} | null = null;
 
-export function getDebugConfigSync(): { debugDNR: boolean } {
+export function getDebugConfigSync(): {
+  debugDNR: boolean;
+  debugTracking: boolean;
+  debugContentAnalysis: boolean;
+  debugPomodoro: boolean;
+  debugZenMode: boolean;
+} {
   if (debugConfigCache === null) {
     // Fallback to default if cache is not initialized
-    return { debugDNR: false };
+    return {
+      debugDNR: false,
+      debugTracking: false,
+      debugContentAnalysis: false,
+      debugPomodoro: false,
+      debugZenMode: false,
+    };
   }
   return debugConfigCache;
 }
@@ -62,4 +92,46 @@ export async function updateDebugConfigCache(): Promise<void> {
  */
 export function isDNRDebugEnabledSync(): boolean {
   return getDebugConfigSync().debugDNR;
+}
+
+/**
+ * Helper functions for each debug flag
+ */
+export async function isTrackingDebugEnabled(): Promise<boolean> {
+  const config = await getDebugConfig();
+  return config.debugTracking;
+}
+
+export async function isContentAnalysisDebugEnabled(): Promise<boolean> {
+  const config = await getDebugConfig();
+  return config.debugContentAnalysis;
+}
+
+export async function isPomodoroDebugEnabled(): Promise<boolean> {
+  const config = await getDebugConfig();
+  return config.debugPomodoro;
+}
+
+export async function isZenModeDebugEnabled(): Promise<boolean> {
+  const config = await getDebugConfig();
+  return config.debugZenMode;
+}
+
+/**
+ * Synchronous versions for performance-critical paths
+ */
+export function isTrackingDebugEnabledSync(): boolean {
+  return getDebugConfigSync().debugTracking;
+}
+
+export function isContentAnalysisDebugEnabledSync(): boolean {
+  return getDebugConfigSync().debugContentAnalysis;
+}
+
+export function isPomodoroDebugEnabledSync(): boolean {
+  return getDebugConfigSync().debugPomodoro;
+}
+
+export function isZenModeDebugEnabledSync(): boolean {
+  return getDebugConfigSync().debugZenMode;
 }
