@@ -125,7 +125,10 @@ async function handleTabActivation(activeInfo: chrome.tabs.TabActiveInfo) {
 }
 
 async function handleTabUpdate(tabId: number, changeInfo: chrome.tabs.TabChangeInfo) {
-  if (tabId === activeTabId && changeInfo.url) {
+  // Verifica se a aba está completa antes de atualizar o tracking
+  // Isso evita race conditions onde tabs.onActivated dispara antes da URL estar definida
+  // Conforme features_information.md linha 71
+  if (tabId === activeTabId && changeInfo.url && changeInfo.status === 'complete') {
     await recordActiveTabUsage();
     await startTrackingTab(tabId, changeInfo.url);
   }
@@ -264,7 +267,7 @@ async function recordActiveTabUsage() {
   dailyUsage[today].perDomain[domain] = (dailyUsage[today].perDomain[domain] || 0) + timeSpent;
   
   // Update total minutes for the day
-  dailyUsage[today].totalMinutes = Object.values(dailyUsage[today].perDomain).reduce((sum: number, time: any) => sum + time, 0) / 60;
+  dailyUsage[today].totalMinutes = Object.values(dailyUsage[today].perDomain).reduce((sum: number, time: number) => sum + time, 0) / 60;
 
   await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
 
@@ -359,6 +362,31 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           removeRuleIds: [ruleId], // remove se já existir
           addRules: [rule],
         });
+        
+        // Redirect active tab immediately if it's on the blocked domain
+        // This ensures immediate blocking even for SPAs that don't trigger MAIN_FRAME requests
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tabs.length > 0 && tabs[0].id && tabs[0].url) {
+            const tabDomain = extractDomain(tabs[0].url);
+            if (tabDomain === domain) {
+              await chrome.tabs.update(tabs[0].id, { url: blockedPageUrl });
+              console.log(`[v0] Redirected active tab ${tabs[0].id} to blocked page for ${domain}`);
+              
+              if (isTrackingDebugEnabledSync()) {
+                console.log("[TRACKING-DEBUG] Active tab redirect:", {
+                  tabId: tabs[0].id,
+                  fromUrl: tabs[0].url,
+                  toUrl: blockedPageUrl,
+                  domain: domain
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`[v0] Could not redirect active tab for ${domain}:`, error);
+          // Não é crítico - a regra DNR ainda funcionará para futuras navegações
+        }
         
         // Always log session rules after creation for debugging
         const sessionRules = await chrome.declarativeNetRequest.getSessionRules();

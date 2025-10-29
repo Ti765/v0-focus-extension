@@ -471,7 +471,10 @@ export async function disablePomodoroBlocking() {
     const existing = await chrome.declarativeNetRequest.getDynamicRules();
     const pomodoroRuleIds = existing
       .map((r) => r.id)
-      .filter((id) => id >= POMODORO_RULE_ID_START && id < USER_BLACKLIST_RULE_ID_START);
+      .filter((id) => 
+        (id >= POMODORO_RULE_ID_START && id < USER_BLACKLIST_RULE_ID_START) ||
+        (id >= POMODORO_RULE_ID_START + CACHE_RULE_ID_OFFSET && id < USER_BLACKLIST_RULE_ID_START + CACHE_RULE_ID_OFFSET)
+      );
 
     if (pomodoroRuleIds.length > 0) {
       try {
