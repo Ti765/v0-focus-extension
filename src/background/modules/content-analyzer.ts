@@ -9,12 +9,29 @@ import { notificationsAllowed } from "./message-handler";
  */
 const NOTIFY_CACHE_KEY = "__contentSuggestNotified__";
 
+// Default suppression window (24 hours) - can be overridden by settings
+const DEFAULT_NOTIFY_SUPPRESS_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Get the suppression window in milliseconds from settings or use default
+ */
+async function getSuppressMs(): Promise<number> {
+  try {
+    const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+    const minutes = settings?.contentAnalysisSuppressionMinutes || (24 * 60);
+    return minutes * 60 * 1000;
+  } catch {
+    return DEFAULT_NOTIFY_SUPPRESS_MS;
+  }
+}
+
 export async function initializeContentAnalyzer() {
   console.log("[v0] Initializing content analyzer module");
   // Opcional: limpar entradas expiradas do cache ao iniciar
   try {
     const { [NOTIFY_CACHE_KEY]: cache = {} } = await chrome.storage.session.get(NOTIFY_CACHE_KEY);
     const now = Date.now();
+    const NOTIFY_SUPPRESS_MS = await getSuppressMs();
     let changed = false;
     for (const d of Object.keys(cache || {})) {
       if (typeof cache[d] !== "number" || now - cache[d] > NOTIFY_SUPPRESS_MS) {
@@ -37,10 +54,8 @@ export async function initializeContentAnalyzer() {
  */
 async function shouldNotifyDomain(domain: string): Promise<boolean> {
   try {
-    // Get configurable suppression window from settings
-    const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
-    const suppressionMinutes = settings?.contentAnalysisSuppressionMinutes || 30;
-    const NOTIFY_SUPPRESS_MS = suppressionMinutes * 60 * 1000;
+    // Use shared suppression logic via getSuppressMs()
+    const NOTIFY_SUPPRESS_MS = await getSuppressMs();
     
     const { [NOTIFY_CACHE_KEY]: cache = {} } = await chrome.storage.session.get(NOTIFY_CACHE_KEY);
     const last = cache?.[domain] as number | undefined;

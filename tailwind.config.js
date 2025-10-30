@@ -14,6 +14,10 @@ module.exports = {
       },
     },
     extend: {
+      // Using system fonts for better compatibility and CSP compliance
+      fontFamily: {
+        futura: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+      },
       // Mantendo suas customizações de cores
       colors: {
         border: "hsl(var(--border))",

@@ -68,7 +68,8 @@
       "resources": [
         "content.js",
         "blocked.html",
-        "blocked.js"
+        "blocked.js",
+        "blocked.css"
       ],
       "matches": [
         "<all_urls>"

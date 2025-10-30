@@ -2,11 +2,6 @@ import { vi } from 'vitest';
 import { beforeAll, afterEach, beforeEach } from 'vitest';
 import type { Chrome } from './mocks/chrome-api';
 
-// Make Chrome API available globally
-declare global {
-  var chrome: any;
-}
-
 // Setup Chrome mocks synchronously before any imports
 import { setupChromeMocks } from './mocks/chrome-api';
 setupChromeMocks();

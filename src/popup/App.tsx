@@ -7,18 +7,21 @@ import { ExternalLink, Focus } from "lucide-react";
 import BlacklistManager from "./components/BlacklistManager";
 import PomodoroTimer from "./PomodoroTimer";
 import UsageDashboard from "./components/UsageDashboard";
+import { usePopupDimensions } from "./hooks/usePopupDimensions";
 
 declare const chrome: any;
 
 type Tab = "pomodoro" | "blacklist" | "dashboard";
 
 export default function App() {
-  const { isLoading, error, setError } = useStoreShallow((s) => ({
+  const { isLoading, error, setError, pomodoro } = useStoreShallow((s) => ({
     isLoading: s.isLoading,
     error: s.error,
     setError: s.setError,
+    pomodoro: s.pomodoro,
   }));
   const [activeTab, setActiveTab] = useState<Tab>("pomodoro");
+  const { dimensions } = usePopupDimensions();
 
   useEffect(() => {
     // Use the store's static accessors to avoid stale closures and to ensure
@@ -62,8 +65,30 @@ export default function App() {
     );
   }
 
+  // Se o pomodoro estiver ativo (não idle), renderizar apenas o PomodoroTimer
+  // que já contém a lógica para mostrar a view fullscreen
+  if (pomodoro?.state?.phase && pomodoro.state.phase !== "idle") {
+    return (
+      <div 
+        className="pomodoro-fullscreen-container"
+        style={{ 
+          '--popup-width': `${dimensions.width}px`,
+          '--popup-height': `${dimensions.height}px`
+        } as React.CSSProperties}
+      >
+        <PomodoroTimer />
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full h-full min-h-[500px] bg-[#0d0d1a] p-2">
+    <div 
+      className="popup-main-container w-full h-full bg-[#0d0d1a] p-2"
+      style={{ 
+        '--popup-width': '380px',
+        '--popup-min-height': '520px'
+      } as React.CSSProperties}
+    >
       <div className="glass-card h-full flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-4 border-b border-white/10 flex items-center justify-between flex-shrink-0">

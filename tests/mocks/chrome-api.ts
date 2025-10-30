@@ -520,8 +520,13 @@ export const mockChrome: Chrome = {
   windows: new MockWindows(),
 };
 
+// Declare global chrome variable
+declare global {
+  var chrome: Chrome;
+}
+
 export function setupChromeMocks(): void {
-  global.chrome = mockChrome as any;
+  global.chrome = mockChrome;
 }
 
 // Export types for use in tests

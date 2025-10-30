@@ -4,6 +4,24 @@ import { useState, useEffect } from "react";
 import { useStoreShallow } from "./store";
 import type { PopupStore } from "./store";
 import { Play, Square, Clock } from "lucide-react";
+import PomodoroActiveView from "./components/PomodoroActiveView";
+
+/**
+ * Helper function to calculate remaining time in seconds
+ * Centralizes the time calculation logic used in both initial state and interval updates
+ */
+function computeRemainingSeconds(pomodoro: any, focusMinutes: number): number {
+  if (pomodoro?.state?.phase === "idle") {
+    return focusMinutes * 60;
+  }
+  if (pomodoro?.state?.endsAt) {
+    const now = new Date();
+    const endsAt = new Date(pomodoro.state.endsAt);
+    const remainingMs = Math.max(0, endsAt.getTime() - now.getTime());
+    return Math.ceil(remainingMs / 1000);
+  }
+  return Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000);
+}
 
 export default function PomodoroTimer() {
   const { pomodoro, startPomodoro, stopPomodoro } = useStoreShallow((s: PopupStore) => ({
@@ -13,7 +31,9 @@ export default function PomodoroTimer() {
   }));
   const [focusMinutes, setFocusMinutes] = useState<number>(pomodoro?.config?.focusMinutes ?? 25);
   const [breakMinutes, setBreakMinutes] = useState<number>(pomodoro?.config?.shortBreakMinutes ?? 5);
-  const [displayTime, setDisplayTime] = useState<number>(Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000));
+  const [displayTime, setDisplayTime] = useState<number>(() => {
+    return computeRemainingSeconds(pomodoro, focusMinutes);
+  });
 
   useEffect(() => {
     // Se estiver inativo, mostre o tempo de foco configurado
@@ -22,19 +42,12 @@ export default function PomodoroTimer() {
       return;
     }
 
-    // Calculate remaining time from endsAt timestamp for accuracy
+    // Set initial time immediately using shared helper
+    setDisplayTime(Math.max(0, computeRemainingSeconds(pomodoro, focusMinutes)));
+
+    // Then set up interval for updates using the same helper
     const interval = setInterval(() => {
-      if (pomodoro?.state?.endsAt) {
-        const now = new Date();
-        const endsAt = new Date(pomodoro.state.endsAt);
-        const remainingMs = Math.max(0, endsAt.getTime() - now.getTime());
-        const currentRemaining = Math.ceil(remainingMs / 1000);
-        setDisplayTime(Math.max(0, currentRemaining));
-      } else {
-        // Fallback to remainingMs if endsAt is not available
-        const currentRemaining = Math.ceil((pomodoro?.state?.remainingMs ?? 0) / 1000);
-        setDisplayTime(Math.max(0, currentRemaining));
-      }
+      setDisplayTime(Math.max(0, computeRemainingSeconds(pomodoro, focusMinutes)));
     }, 1000);
 
     return () => clearInterval(interval);
@@ -49,6 +62,17 @@ export default function PomodoroTimer() {
     const secs = Math.floor(seconds % 60);
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // Se estiver em fase ativa (focus ou break), renderizar view fullscreen
+  if (pomodoro?.state?.phase && pomodoro.state.phase !== "idle") {
+    return (
+      <PomodoroActiveView
+        displayTime={displayTime}
+        phase={pomodoro.state.phase as "focus" | "short_break" | "long_break"}
+        onStop={stopPomodoro}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
