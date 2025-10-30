@@ -1007,15 +1007,11 @@ async function be() {
       remainingMs: i,
       endsAt: s.toISOString()
     };
-    if (await chrome.storage.local.set({
+    await chrome.storage.local.set({
       [a.POMODORO_STATUS]: { config: o, state: r }
-    }), i < 6e4)
-      await chrome.alarms.create(y.POMODORO, { delayInMinutes: 0 });
-    else {
-      const c = Math.ceil(i / 6e4);
-      await chrome.alarms.create(y.POMODORO, { delayInMinutes: c });
-    }
-    t.phase === "focus" && await $(), console.log(`[v0] Pomodoro recovery: Resumed timer with ${remainingMinutes} minutes remaining`);
+    });
+    const c = i / (60 * 1e3), d = i < 6e4 ? 0 : Math.ceil(i / (60 * 1e3));
+    i < 6e4 ? await chrome.alarms.create(y.POMODORO, { delayInMinutes: 0 }) : await chrome.alarms.create(y.POMODORO, { delayInMinutes: c }), t.phase === "focus" && await $(), console.log(`[v0] Pomodoro recovery: Resumed timer with ${d} minutes remaining`);
   } catch (e) {
     console.error("[v0] Pomodoro recovery failed:", e);
   }

@@ -171,9 +171,15 @@ export const useStore = create<PopupStore>()((set, get) => ({
       globalListener = (msg: Message) => {
         if (!msg || typeof msg !== "object") return;
 
+        // Debug: Log de mensagens recebidas
+        console.log("[DEBUG] Store listener received message:", msg.type, msg.id);
+
         // Dedupe por id
         debug('[dbg] listenForUpdates -> incoming message', msg);
-        if (msg.id && processedIds.has(msg.id)) return;
+        if (msg.id && processedIds.has(msg.id)) {
+          console.log("[DEBUG] Message already processed, skipping:", msg.id);
+          return;
+        }
         if (msg.id) {
           processedIds.add(msg.id);
           // limpeza tardia evita leak: 5 min
@@ -181,6 +187,7 @@ export const useStore = create<PopupStore>()((set, get) => ({
         }
 
         if (msg.type === MESSAGE.STATE_UPDATED && msg.payload) {
+          console.log("[DEBUG] Processing STATE_UPDATED message");
           const incoming: AppState = (msg.payload as any).state ?? msg.payload;
           const curr = pickComparable(get());
           const next = pickComparable(incoming);
@@ -188,10 +195,16 @@ export const useStore = create<PopupStore>()((set, get) => ({
           if (!deepEqual(curr, next)) {
             // Se o conteúdo não mudou, não atualize (evita eco)
             const hash = stableStringify(next);
-            if (hash === lastStateHash) return;
+            if (hash === lastStateHash) {
+              console.log("[DEBUG] State hash unchanged, skipping update");
+              return;
+            }
             
+            console.log("[DEBUG] State changed, updating store");
             lastStateHash = hash;
             set({ ...(incoming as any), isLoading: false, error: null });
+          } else {
+            console.log("[DEBUG] State content unchanged, skipping update");
           }
         }
       };

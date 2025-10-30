@@ -2,24 +2,20 @@
 
 import { useState } from "react";
 import { useStore } from "../store";
+import { formatTime } from "../formatTime";
 import { Play, Square, Clock, Pause, Coffee } from "lucide-react";
 
-function formatTime(seconds: number) {
-  const s = Math.max(0, seconds | 0);
-  const mins = Math.floor(s / 60);
-  const secs = s % 60;
-  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-}
-
 export default function PomodoroTimer() {
-  const { pomodoro, startPomodoro, stopPomodoro, pausePomodoro, resumePomodoro, startBreak } = useStore((s: any) => ({
-    pomodoro: s.pomodoro,
-    startPomodoro: s.startPomodoro,
-    stopPomodoro: s.stopPomodoro,
-    pausePomodoro: s.pausePomodoro,
-    resumePomodoro: s.resumePomodoro,
-    startBreak: s.startBreak,
-  }));
+  // Debug: Log de re-renderizações
+  console.log("[DEBUG] PomodoroTimer render - timestamp:", Date.now());
+
+  // Seleciona valores/ações diretamente do store para evitar stale closures
+  const pomodoro = useStore((s) => s.pomodoro);
+  const startPomodoro = useStore((s) => s.startPomodoro);
+  const stopPomodoro = useStore((s) => s.stopPomodoro);
+  const pausePomodoro = useStore((s) => s.pausePomodoro);
+  const resumePomodoro = useStore((s) => s.resumePomodoro);
+  const startBreak = useStore((s) => s.startBreak);
 
   // Respeita seu shape atual: shortBreakMinutes existe em PomodoroConfig
   const [focusMinutes, setFocusMinutes] = useState(pomodoro.config.focusMinutes || 25);
