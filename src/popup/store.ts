@@ -111,6 +111,9 @@ export interface PopupStore extends AppState {
   setTimeLimit: (domain: string, limitMinutes: number) => Promise<void>;
   startPomodoro: (focusMinutes: number, breakMinutes: number) => Promise<void>;
   stopPomodoro: () => Promise<void>;
+  pausePomodoro: () => Promise<void>;
+  resumePomodoro: () => Promise<void>;
+  startBreak: () => Promise<void>;
   toggleZenMode: (preset?: string) => Promise<void>;
   updateSettings: (partial: Partial<AppState["settings"]>) => Promise<void>;
 }
@@ -283,6 +286,42 @@ export const useStore = create<PopupStore>()((set, get) => ({
       const msg = (e as Error)?.message ?? String(e);
       console.error("[store] stopPomodoro failed:", msg);
       set({ error: "Falha ao parar Pomodoro: " + msg });
+      throw e;
+    }
+  },
+
+  pausePomodoro: async () => {
+    set({ error: null });
+    try {
+      await sendMessageAsync(createMessage(MESSAGE.POMODORO_PAUSE, undefined, { source: "popup-ui" }));
+    } catch (e) {
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] pausePomodoro failed:", msg);
+      set({ error: "Falha ao pausar Pomodoro: " + msg });
+      throw e;
+    }
+  },
+
+  resumePomodoro: async () => {
+    set({ error: null });
+    try {
+      await sendMessageAsync(createMessage(MESSAGE.POMODORO_RESUME, undefined, { source: "popup-ui" }));
+    } catch (e) {
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] resumePomodoro failed:", msg);
+      set({ error: "Falha ao retomar Pomodoro: " + msg });
+      throw e;
+    }
+  },
+
+  startBreak: async () => {
+    set({ error: null });
+    try {
+      await sendMessageAsync(createMessage(MESSAGE.START_BREAK, undefined, { source: "popup-ui" }));
+    } catch (e) {
+      const msg = (e as Error)?.message ?? String(e);
+      console.error("[store] startBreak failed:", msg);
+      set({ error: "Falha ao iniciar descanso: " + msg });
       throw e;
     }
   },

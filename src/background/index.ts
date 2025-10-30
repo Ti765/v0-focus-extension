@@ -3,7 +3,7 @@ console.log("[v0] Service Worker starting up...");
 console.log("[v0] DEBUG: Extension version:", chrome.runtime.getManifest().version);
 console.log("[v0] DEBUG: Manifest permissions:", chrome.runtime.getManifest().permissions);
 
-import { initializePomodoro } from "./modules/pomodoro";
+import { initializePomodoro, startBreak } from "./modules/pomodoro";
 import {
   initializeBlocker,
   addToBlacklist,
@@ -77,6 +77,35 @@ async function bootstrap() {
   }
   
   console.log("[v0] DEBUG: Bootstrap process completed");
+}
+
+/**
+ * Solicita permissão para notificações e envia notificação de boas-vindas
+ */
+async function requestNotificationPermission() {
+  try {
+    // Verifica se já temos permissão
+    const hasPermission = chrome.notifications !== undefined;
+    
+    if (hasPermission) {
+      console.log('[v0] Notification permission granted');
+      
+      // Envia notificação de boas-vindas
+      await chrome.notifications.create('welcome-notification', {
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Focus Extension Ativada!',
+        message: 'As notificações estão funcionando. Você receberá alertas sobre Pomodoro e sites distrativos.',
+        priority: 1
+      });
+      
+      console.log('[v0] Welcome notification sent');
+    } else {
+      console.warn('[v0] Notifications API not available');
+    }
+  } catch (error) {
+    console.error('[v0] Failed to request notification permission:', error);
+  }
 }
 
 /**
@@ -226,6 +255,11 @@ async function initializeExtension(details: chrome.runtime.InstalledDetails) {
     // Instalação: injeta content.js nas abas já abertas
     console.log("[v0] DEBUG: Injecting content scripts into existing tabs...");
     await injectContentScriptIntoAllTabs();
+    
+    // Solicita permissão de notificações e envia boas-vindas
+    console.log("[v0] DEBUG: Requesting notification permissions...");
+    await requestNotificationPermission();
+    console.log("[v0] DEBUG: ✅ Notification permission request completed");
   }
 
   if (details.reason === "update") {
@@ -338,6 +372,10 @@ function initializeListeners() {
           await addToBlacklist(domain);
           console.log(`[v0] Added ${domain} to blacklist from notification.`);
         }
+      } else if (notificationId === "pomodoro-focus-complete" && buttonIndex === 0) {
+        // Botão "Iniciar Descanso"
+        await startBreak();
+        console.log("[v0] Break started from notification");
       }
     } finally {
       // Sempre limpa a notificação

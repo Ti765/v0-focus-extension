@@ -50,7 +50,7 @@ export interface DailyUsage {
  * Domínio: Pomodoro
  * ========================= */
 
-export type PomodoroPhase = "idle" | "focus" | "short_break" | "long_break";
+export type PomodoroPhase = "idle" | "focus" | "focus_complete" | "short_break" | "long_break";
 
 export interface PomodoroConfig {
   focusMinutes: number;
@@ -67,6 +67,8 @@ export interface PomodoroState {
   startedAt?: RFC3339String;
   endsAt?: RFC3339String;
   remainingMs?: number;
+  pausedAt?: RFC3339String; // Novo: timestamp quando pausou
+  pendingBreakType?: "short" | "long"; // Novo: tipo de break aguardando início
 }
 
 /* =========================
@@ -163,6 +165,7 @@ export const MESSAGE = {
   POMODORO_PAUSE: "POMODORO_PAUSE",
   POMODORO_RESUME: "POMODORO_RESUME",
   POMODORO_STOP: "POMODORO_STOP",
+  START_BREAK: "START_BREAK",
 
   // Sinalização/diagnóstico
   PING: "PING",
@@ -254,6 +257,7 @@ export type Message =
   | BaseMessage<typeof MESSAGE.POMODORO_PAUSE, PomodoroSimplePayload>
   | BaseMessage<typeof MESSAGE.POMODORO_RESUME, PomodoroSimplePayload>
   | BaseMessage<typeof MESSAGE.POMODORO_STOP, PomodoroSimplePayload>
+  | BaseMessage<typeof MESSAGE.START_BREAK, PomodoroSimplePayload>
   | BaseMessage<typeof MESSAGE.PING, PingPayload>
   | BaseMessage<typeof MESSAGE.PONG, PongPayload>
   | BaseMessage<typeof MESSAGE.ERROR, ErrorPayload>

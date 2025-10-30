@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useStore, useStoreShallow } from "./store";
 import { ExternalLink, Focus } from "lucide-react";
 import BlacklistManager from "./components/BlacklistManager";
-import PomodoroTimer from "./PomodoroTimer";
+import PomodoroTimer from "./components/PomodoroTimer";
 import UsageDashboard from "./components/UsageDashboard";
 import { usePopupDimensions } from "./hooks/usePopupDimensions";
 

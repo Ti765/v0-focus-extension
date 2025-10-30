@@ -6,7 +6,7 @@ import {
   DEFAULT_SETTINGS,
 } from "../../shared/constants";
 import { addToBlacklist, removeFromBlacklist } from "./blocker";
-import { startPomodoro, stopPomodoro } from "./pomodoro";
+import { startPomodoro, stopPomodoro, pausePomodoro, resumePomodoro, startBreak } from "./pomodoro";
 import { setTimeLimit } from "./usage-tracker";
 import { handleContentAnalysisResult } from "./content-analyzer";
 
@@ -201,12 +201,35 @@ export async function handleMessage(
     }
 
     case MESSAGE.POMODORO_START: {
-      await startPomodoro((message.payload as any) || undefined);
+      const payload = message.payload as any;
+      console.log("[v0] DEBUG: POMODORO_START - full payload:", JSON.stringify(payload));
+      console.log("[v0] DEBUG: POMODORO_START - payload.config:", JSON.stringify(payload?.config));
+      
+      // Extrai apenas o config do payload
+      const config = payload?.config || payload;
+      console.log("[v0] DEBUG: POMODORO_START - extracted config:", JSON.stringify(config));
+      
+      await startPomodoro(config);
       return { success: true };
     }
 
     case MESSAGE.POMODORO_STOP: {
       await stopPomodoro();
+      return { success: true };
+    }
+
+    case MESSAGE.POMODORO_PAUSE: {
+      await pausePomodoro();
+      return { success: true };
+    }
+
+    case MESSAGE.POMODORO_RESUME: {
+      await resumePomodoro();
+      return { success: true };
+    }
+
+    case MESSAGE.START_BREAK: {
+      await startBreak();
       return { success: true };
     }
 

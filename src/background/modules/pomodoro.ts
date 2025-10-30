@@ -1,5 +1,5 @@
 import { STORAGE_KEYS, ALARM_NAMES, DEFAULT_POMODORO_CONFIG } from "../../shared/constants";
-import type { PomodoroState, PomodoroConfig } from "../../shared/types";
+import type { PomodoroState, PomodoroConfig, UserSettings } from "../../shared/types";
 import { enablePomodoroBlocking, disablePomodoroBlocking } from "./blocker";
 import { notifyStateUpdate } from "./message-handler";
 
@@ -8,7 +8,7 @@ import { notifyStateUpdate } from "./message-handler";
  * Centralizes the schema handling for notification preferences
  */
 async function getNotificationSetting(): Promise<boolean> {
-  const settings = (await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS] as any;
+  const settings = (await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS] as UserSettings | undefined;
   return settings?.notifications ?? settings?.notificationsEnabled ?? false;
 }
 
@@ -63,14 +63,19 @@ async function recoverActiveTimer() {
       [STORAGE_KEYS.POMODORO_STATUS]: { config, state: updatedState } 
     });
     
+    // Calculate fractional minutes for accurate alarm timing
+    const remainingMinutesFraction = remainingMs / (60 * 1000);
+    
+    // Calculate display minutes for user-facing log (rounded up)
+    const displayMinutes = remainingMs < 60_000 ? 0 : Math.ceil(remainingMs / (60 * 1000));
+    
     // Recreate alarm for remaining time
     if (remainingMs < 60_000) {
       // If less than 1 minute remaining, trigger alarm immediately
       await chrome.alarms.create(ALARM_NAMES.POMODORO, { delayInMinutes: 0 });
     } else {
-      // Otherwise, calculate delay in minutes
-      const remainingMinutes = Math.ceil(remainingMs / (60 * 1000));
-      await chrome.alarms.create(ALARM_NAMES.POMODORO, { delayInMinutes: remainingMinutes });
+      // Otherwise, use accurate fractional delay in minutes
+      await chrome.alarms.create(ALARM_NAMES.POMODORO, { delayInMinutes: remainingMinutesFraction });
     }
     
     // Re-enable blocking if in focus phase
@@ -78,7 +83,7 @@ async function recoverActiveTimer() {
       await enablePomodoroBlocking();
     }
     
-    console.log(`[v0] Pomodoro recovery: Resumed timer with ${remainingMinutes} minutes remaining`);
+    console.log(`[v0] Pomodoro recovery: Resumed timer with ${displayMinutes} minutes remaining`);
     
   } catch (error) {
     console.error("[v0] Pomodoro recovery failed:", error);
@@ -173,6 +178,138 @@ export async function stopPomodoro() {
   console.log("[v0] Pomodoro stopped");
 }
 
+export async function pausePomodoro() {
+  const { [STORAGE_KEYS.POMODORO_STATUS]: snapshot } = 
+    await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS);
+  
+  if (!snapshot?.state) return;
+  
+  const state = snapshot.state as PomodoroState;
+  const config = snapshot.config || DEFAULT_POMODORO_CONFIG;
+  
+  // Só pode pausar se estiver rodando (não idle, não pausado)
+  if (state.phase === "idle" || state.isPaused) return;
+  
+  // Calcula tempo restante no momento do pause
+  const now = new Date();
+  const endsAt = state.endsAt ? new Date(state.endsAt) : now;
+  const remainingMs = Math.max(0, endsAt.getTime() - now.getTime());
+  
+  const pausedState: PomodoroState = {
+    ...state,
+    isPaused: true,
+    pausedAt: now.toISOString(),
+    remainingMs,
+    endsAt: undefined // Remove endsAt pois não há mais deadline
+  };
+  
+  // Cancela alarm
+  await chrome.alarms.clear(ALARM_NAMES.POMODORO);
+  await chrome.alarms.clear("pomodoro-keepalive");
+  
+  // Mantém bloqueios se em focus (não desabilita)
+  
+  await chrome.storage.local.set({ 
+    [STORAGE_KEYS.POMODORO_STATUS]: { config, state: pausedState } 
+  });
+  
+  await notifyStateUpdate();
+  console.log("[v0] Pomodoro paused:", pausedState);
+}
+
+export async function resumePomodoro() {
+  const { [STORAGE_KEYS.POMODORO_STATUS]: snapshot } = 
+    await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS);
+  
+  if (!snapshot?.state || !snapshot.state.isPaused) return;
+  
+  const state = snapshot.state as PomodoroState;
+  const config = snapshot.config || DEFAULT_POMODORO_CONFIG;
+  
+  const now = new Date();
+  const remainingMs = state.remainingMs || 0;
+  
+  if (remainingMs <= 0) {
+    // Tempo esgotou, trata como alarm
+    await handlePomodoroAlarm();
+    return;
+  }
+  
+  const endsAt = new Date(now.getTime() + remainingMs);
+  
+  const resumedState: PomodoroState = {
+    ...state,
+    isPaused: false,
+    pausedAt: undefined,
+    endsAt: endsAt.toISOString(),
+    remainingMs
+  };
+  
+  await chrome.storage.local.set({ 
+    [STORAGE_KEYS.POMODORO_STATUS]: { config, state: resumedState } 
+  });
+  
+  // Recria alarm com tempo restante
+  const remainingMinutes = Math.ceil(remainingMs / (60 * 1000));
+  await chrome.alarms.create(ALARM_NAMES.POMODORO, { 
+    delayInMinutes: Math.max(remainingMinutes, 0.1) // Min 6 segundos
+  });
+  
+  // Recria keep-alive se necessário
+  if (state.phase === "focus") {
+    await chrome.alarms.create("pomodoro-keepalive", { 
+      delayInMinutes: 5, 
+      periodInMinutes: 5 
+    });
+  }
+  
+  await notifyStateUpdate();
+  console.log("[v0] Pomodoro resumed:", resumedState);
+}
+
+export async function startBreak() {
+  const { [STORAGE_KEYS.POMODORO_STATUS]: snapshot } = 
+    await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS);
+  
+  if (!snapshot?.state || snapshot.state.phase !== "focus_complete") return;
+  
+  const state = snapshot.state as PomodoroState;
+  const config = snapshot.config || DEFAULT_POMODORO_CONFIG;
+  
+  const breakType = state.pendingBreakType || "short";
+  const breakMinutes = breakType === "long" 
+    ? config.longBreakMinutes 
+    : config.shortBreakMinutes;
+  
+  const now = new Date();
+  const endsAt = new Date(now.getTime() + breakMinutes * 60 * 1000);
+  
+  const breakState: PomodoroState = {
+    ...state,
+    phase: breakType === "long" ? "long_break" : "short_break",
+    isPaused: false,
+    startedAt: now.toISOString(),
+    endsAt: endsAt.toISOString(),
+    remainingMs: breakMinutes * 60 * 1000,
+    pendingBreakType: undefined
+  };
+  
+  await chrome.storage.local.set({ 
+    [STORAGE_KEYS.POMODORO_STATUS]: { config, state: breakState } 
+  });
+  
+  await chrome.alarms.create(ALARM_NAMES.POMODORO, { 
+    delayInMinutes: breakMinutes 
+  });
+  
+  // Desabilita bloqueios agora que break começou
+  await disablePomodoroBlocking();
+  
+  await notifyStateUpdate();
+  
+  console.log("[v0] Break started:", breakState);
+}
+
 async function handlePomodoroAlarm() {
   const { [STORAGE_KEYS.POMODORO_STATUS]: snapshot } =
     (await chrome.storage.local.get(STORAGE_KEYS.POMODORO_STATUS)) as any;
@@ -184,49 +321,41 @@ async function handlePomodoroAlarm() {
 
   if (status.phase === "focus") {
     const isLongBreak = status.cycleIndex % config.cyclesBeforeLongBreak === 0;
-    const breakMinutes = isLongBreak ? config.longBreakMinutes : config.shortBreakMinutes;
-    const now = new Date();
-    const endsAt = new Date(now.getTime() + breakMinutes * 60 * 1000);
+    const breakType = isLongBreak ? "long" : "short";
     
-    const newState: PomodoroState = {
+    const completeState: PomodoroState = {
       ...status,
-      phase: isLongBreak ? "long_break" : "short_break",
-      startedAt: now.toISOString(),
-      endsAt: endsAt.toISOString(),
-      remainingMs: breakMinutes * 60 * 1000,
+      phase: "focus_complete",
+      isPaused: false,
+      remainingMs: 0,
+      endsAt: undefined,
+      pendingBreakType: breakType
     };
-
-    await chrome.storage.local.set({ [STORAGE_KEYS.POMODORO_STATUS]: { config, state: newState } });
-    await chrome.alarms.create(ALARM_NAMES.POMODORO, { delayInMinutes: breakMinutes });
     
-    // Clear keep-alive alarm during break transition to prevent unnecessary firing
-    try {
-      await chrome.alarms.clear("pomodoro-keepalive");
-    } catch (error) {
-      console.warn("[v0] Failed to clear keep-alive alarm:", error);
-    }
+    await chrome.storage.local.set({ 
+      [STORAGE_KEYS.POMODORO_STATUS]: { config, state: completeState } 
+    });
     
-    await disablePomodoroBlocking();
+    await chrome.alarms.clear("pomodoro-keepalive");
+    
+    // MANTÉM bloqueios ativos (não chama disablePomodoroBlocking)
+    
     await notifyStateUpdate();
-
-    const notifyEnabled = await getNotificationSetting();
     
-    console.log('[v0] Break notification settings:', { notifyEnabled });
-
+    // Notifica que foco terminou
+    const notifyEnabled = await getNotificationSetting();
     if (notifyEnabled) {
-      try {
-        await chrome.notifications.create("pomodoro-break", {
-          type: "basic",
-          iconUrl: "icons/icon48.png",
-          title: "Pausa!",
-          message: `Descanse por ${breakMinutes} minutos. Você merece!`,
-        });
-        console.log('[v0] Break notification created successfully');
-      } catch (error) {
-        console.error('[v0] Failed to create break notification:', error);
-      }
+      await chrome.notifications.create("pomodoro-focus-complete", {
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: "Foco Completo! 🎯",
+        message: `Parabéns! Você completou ${config.focusMinutes} minutos de foco. Pronto para o descanso?`,
+        buttons: [{ title: "Iniciar Descanso" }],
+        requireInteraction: true // Força usuário a interagir
+      });
     }
-    console.log("[v0] Pomodoro: Focus → Break");
+    
+    console.log("[v0] Pomodoro: Focus → Focus Complete (awaiting user)");
 
   } else if (status.phase === "short_break" || status.phase === "long_break") {
     // end of break -> idle
