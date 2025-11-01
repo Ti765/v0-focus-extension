@@ -101,7 +101,7 @@ export default function SettingsView() {
         const notificationId = `test-notification-${Date.now()}`;
         await chrome.notifications.create(notificationId, {
           type: "basic",
-          iconUrl: chrome.runtime.getURL("icon48.png"),
+          iconUrl: chrome.runtime.getURL("icons/icon48.png"),
           title: "Teste de Notificação",
           message: "As notificações estão funcionando corretamente!",
         });

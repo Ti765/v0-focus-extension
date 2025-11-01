@@ -97,7 +97,7 @@ const s = {
   // Backward compat
   analyticsConsent: !1,
   notificationsEnabled: !0
-}, w = {
+}, D = {
   focusMinutes: 25,
   shortBreakMinutes: 5,
   longBreakMinutes: 15,
@@ -140,18 +140,18 @@ function O(e) {
     return t.split("/")[0].replace(/^www\./, "");
   }
 }
-function C(e) {
+function G(e) {
   if (!e) return "";
   try {
-    const o = new URL(e.startsWith("http") ? e : `https://${e}`).hostname.replace(/^www\./, ""), n = o.split("."), a = ["co.uk", "co.jp", "com.br", "com.au", "co.nz"];
-    for (const i of a)
-      if (o.endsWith(`.${i}`))
+    const o = new URL(e.startsWith("http") ? e : `https://${e}`).hostname.replace(/^www\./, ""), n = o.split("."), i = ["co.uk", "co.jp", "com.br", "com.au", "co.nz"];
+    for (const a of i)
+      if (o.endsWith(`.${a}`))
         return o.split(".").slice(-3).join(".");
     return n.slice(-2).join(".");
   } catch {
     const t = e.replace(/^www\./, "").split("/")[0], o = t.split("."), n = ["co.uk", "co.jp", "com.br", "com.au", "co.nz"];
-    for (const a of n)
-      if (t.endsWith(`.${a}`))
+    for (const i of n)
+      if (t.endsWith(`.${i}`))
         return t.split(".").slice(-3).join(".");
     return o.slice(-2).join(".");
   }
@@ -182,20 +182,20 @@ async function X() {
 async function ee() {
   return (await X()).debugDNR;
 }
-let G = null;
+let C = null;
 function ye() {
-  return G === null ? {
+  return C === null ? {
     debugDNR: !1,
     debugTracking: !1,
     debugContentAnalysis: !1,
     debugPomodoro: !1,
     debugZenMode: !1
-  } : G;
+  } : C;
 }
 async function te() {
-  G = await X();
+  C = await X();
 }
-function E() {
+function I() {
   return ye().debugTracking;
 }
 let k = null, Z = !1, H = !1;
@@ -203,8 +203,8 @@ const pe = 3e3, Te = 1e3;
 function F(e) {
   let t = 0;
   for (let n = 0; n < e.length; n++) {
-    const a = e.charCodeAt(n);
-    t = (t << 5) - t + a, t |= 0;
+    const i = e.charCodeAt(n);
+    t = (t << 5) - t + i, t |= 0;
   }
   const o = Math.abs(t) % Te;
   return pe + o;
@@ -220,8 +220,8 @@ async function Re() {
     periodInMinutes: 24 * 60
   }), console.log(
     `[v0] Daily sync scheduled in ${(n - Date.now()) / 6e4 >> 0} minutes, then every 24h.`
-  ), chrome.alarms.onAlarm.addListener(async (a) => {
-    a.name === p.DAILY_SYNC && (console.log("[v0] Daily sync triggered: clearing time limit session rules."), await Se());
+  ), chrome.alarms.onAlarm.addListener(async (i) => {
+    i.name === p.DAILY_SYNC && (console.log("[v0] Daily sync triggered: clearing time limit session rules."), await Se());
   });
 }
 async function Se() {
@@ -237,15 +237,15 @@ async function Se() {
       console.error("[v0] Error clearing time limit session rules:", o);
     }
 }
-async function De() {
+async function ve() {
   Z || (Z = !0, console.log("[v0] Initializing usage tracker module"), await te(), await chrome.alarms.clear(p.USAGE_TRACKER), await chrome.alarms.create(p.USAGE_TRACKER, {
     periodInMinutes: P
   }), chrome.alarms.onAlarm.addListener(async (e) => {
-    e.name === p.USAGE_TRACKER && await _();
-  }), chrome.tabs.onActivated.addListener(we), chrome.tabs.onUpdated.addListener(ve), chrome.windows.onFocusChanged.addListener(Ee), await oe());
+    e.name === p.USAGE_TRACKER && await M();
+  }), chrome.tabs.onActivated.addListener(De), chrome.tabs.onUpdated.addListener(we), chrome.windows.onFocusChanged.addListener(Ie), await oe());
 }
-async function we(e) {
-  await _();
+async function De(e) {
+  await M();
   try {
     const t = await chrome.tabs.get(e.tabId);
     await x(t.id, t.url);
@@ -253,11 +253,11 @@ async function we(e) {
     console.warn(`[v0] Could not get tab info for tabId: ${e.tabId}`, t), await A();
   }
 }
-async function ve(e, t) {
-  e === k && t.url && t.status === "complete" && (await _(), await x(e, t.url));
+async function we(e, t) {
+  e === k && t.url && t.status === "complete" && (await M(), await x(e, t.url));
 }
-async function Ee(e) {
-  e === chrome.windows.WINDOW_ID_NONE ? (await _(), await A()) : await oe();
+async function Ie(e) {
+  e === chrome.windows.WINDOW_ID_NONE ? (await M(), await A()) : await oe();
 }
 async function oe() {
   const [e] = await chrome.tabs.query({ active: !0, currentWindow: !0 });
@@ -280,32 +280,32 @@ async function x(e, t) {
 async function A() {
   k = null, await chrome.storage.session.remove(s.CURRENTLY_TRACKING);
 }
-async function _() {
+async function M() {
   const t = (await chrome.storage.session.get(s.CURRENTLY_TRACKING))[s.CURRENTLY_TRACKING];
   if (!t || !t.url || !t.startTime) {
-    E() && console.log("[TRACKING-DEBUG] No active tracking info:", { trackingInfo: t });
+    I() && console.log("[TRACKING-DEBUG] No active tracking info:", { trackingInfo: t });
     return;
   }
-  const o = C(t.url);
+  const o = G(t.url);
   if (!o) {
-    E() && console.log("[TRACKING-DEBUG] Invalid domain from URL:", { url: t.url }), await A();
+    I() && console.log("[TRACKING-DEBUG] Invalid domain from URL:", { url: t.url }), await A();
     return;
   }
-  const n = Date.now(), a = Math.floor((n - t.startTime) / 1e3), i = t.lastUpdate || t.startTime, r = n - i, c = P * 60 * 1e3 * 2;
-  if (r > c && (E() && console.log("[TRACKING-DEBUG] Detected tracking gap:", {
+  const n = Date.now(), i = Math.floor((n - t.startTime) / 1e3), a = t.lastUpdate || t.startTime, r = n - a, c = P * 60 * 1e3 * 2;
+  if (r > c && (I() && console.log("[TRACKING-DEBUG] Detected tracking gap:", {
     gapMs: Math.floor(r / 1e3),
     maxGapMs: Math.floor(c / 1e3),
     domain: o,
     url: t.url
-  }), t.startTime = n - P * 60 * 1e3), E() && console.log("[TRACKING-DEBUG] Recording usage:", {
+  }), t.startTime = n - P * 60 * 1e3), I() && console.log("[TRACKING-DEBUG] Recording usage:", {
     domain: o,
-    timeSpent: a,
+    timeSpent: i,
     url: t.url,
     startTime: new Date(t.startTime).toISOString(),
     endTime: (/* @__PURE__ */ new Date()).toISOString(),
     gapDetected: r > c
-  }), t.startTime = n, t.lastUpdate = n, await chrome.storage.session.set({ [s.CURRENTLY_TRACKING]: t }), a < 1) {
-    E() && console.log("[TRACKING-DEBUG] Skipping record, time spent < 1s");
+  }), t.startTime = n, t.lastUpdate = n, await chrome.storage.session.set({ [s.CURRENTLY_TRACKING]: t }), i < 1) {
+    I() && console.log("[TRACKING-DEBUG] Skipping record, time spent < 1s");
     return;
   }
   const d = (/* @__PURE__ */ new Date()).toISOString().split("T")[0], { [s.DAILY_USAGE]: g = {} } = await chrome.storage.local.get(
@@ -318,22 +318,22 @@ async function _() {
       perDomain: {}
     }
   };
-  l[d].perDomain || (l[d].perDomain = {}), l[d].perDomain[o] = (l[d].perDomain[o] || 0) + a, l[d].totalMinutes = Object.values(l[d].perDomain).reduce((m, R) => m + R, 0) / 60, await chrome.storage.local.set({ [s.DAILY_USAGE]: l }), console.log("[v0] Recorded usage:", o, a, "seconds"), await y(), await ne(o, l[d].perDomain[o]);
+  l[d].perDomain || (l[d].perDomain = {}), l[d].perDomain[o] = (l[d].perDomain[o] || 0) + i, l[d].totalMinutes = Object.values(l[d].perDomain).reduce((m, R) => m + R, 0) / 60, await chrome.storage.local.set({ [s.DAILY_USAGE]: l }), console.log("[v0] Recorded usage:", o, i, "seconds"), await y(), await ne(o, l[d].perDomain[o]);
 }
 async function ne(e, t) {
   const { [s.TIME_LIMITS]: o = [] } = await chrome.storage.local.get(
     s.TIME_LIMITS
-  ), a = (Array.isArray(o) ? o : []).find((c) => c.domain === e);
-  if (!a) return;
-  const i = a.dailyMinutes ?? a.limitMinutes ?? 0, r = i * 60;
+  ), i = (Array.isArray(o) ? o : []).find((c) => c.domain === e);
+  if (!i) return;
+  const a = i.dailyMinutes ?? i.limitMinutes ?? 0, r = a * 60;
   if (t >= r) {
     const c = F(e);
     try {
-      E() && console.log("[TRACKING-DEBUG] Time limit check:", {
+      I() && console.log("[TRACKING-DEBUG] Time limit check:", {
         domain: e,
         totalSecondsToday: t,
         limitSeconds: r,
-        limitMinutes: i,
+        limitMinutes: a,
         exceeded: t >= r
       });
       const d = B(e), g = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(e)}`);
@@ -386,7 +386,7 @@ async function ne(e, t) {
       });
       try {
         const u = await chrome.tabs.query({ active: !0, currentWindow: !0 });
-        u.length > 0 && u[0].id && u[0].url && C(u[0].url) === e && (await chrome.tabs.update(u[0].id, { url: g }), console.log(`[v0] Redirected active tab ${u[0].id} to blocked page for ${e}`), E() && console.log("[TRACKING-DEBUG] Active tab redirect:", {
+        u.length > 0 && u[0].id && u[0].url && G(u[0].url) === e && (await chrome.tabs.update(u[0].id, { url: g }), console.log(`[v0] Redirected active tab ${u[0].id} to blocked page for ${e}`), I() && console.log("[TRACKING-DEBUG] Active tab redirect:", {
           tabId: u[0].id,
           fromUrl: u[0].url,
           toUrl: g,
@@ -407,30 +407,30 @@ async function ne(e, t) {
       })))), console.log(
         `[v0] Time limit reached for ${e}. Session block rule ${c} added.`
       );
-      const { createNotification: b } = await Promise.resolve().then(() => N);
+      const { createNotification: b } = await Promise.resolve().then(() => _);
       await b({
         notificationId: `limit-exceeded-${e}`,
         type: "basic",
         title: "Limite de Tempo Atingido",
-        message: `Você atingiu o limite de ${i} minutos em ${e} hoje.`
+        message: `Você atingiu o limite de ${a} minutos em ${e} hoje.`
       });
     } catch (d) {
       console.error(`[v0] Error updating session rule for time limit on ${e}:`, d);
     }
   }
 }
-async function Ie(e, t) {
+async function Ee(e, t) {
   const o = O(e);
   if (!o) return;
   const { [s.TIME_LIMITS]: n = [] } = await chrome.storage.local.get(
     s.TIME_LIMITS
-  ), a = Array.isArray(n) ? n : [], i = a.findIndex((c) => c.domain === o), r = F(o);
+  ), i = Array.isArray(n) ? n : [], a = i.findIndex((c) => c.domain === o), r = F(o);
   if (t > 0) {
-    if (i >= 0)
-      a[i].dailyMinutes = t;
+    if (a >= 0)
+      i[a].dailyMinutes = t;
     else {
       const l = (m) => m;
-      a.push({ domain: l(o), dailyMinutes: t });
+      i.push({ domain: l(o), dailyMinutes: t });
     }
     const c = (/* @__PURE__ */ new Date()).toISOString().split("T")[0], { [s.DAILY_USAGE]: d = {} } = await chrome.storage.local.get(
       s.DAILY_USAGE
@@ -442,18 +442,18 @@ async function Ie(e, t) {
         await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [r] });
       } catch {
       }
-  } else if (i >= 0) {
-    a.splice(i, 1);
+  } else if (a >= 0) {
+    i.splice(a, 1);
     try {
       await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [r] });
     } catch {
     }
     console.log(`[v0] Time limit removed for: ${o}`);
   }
-  await chrome.storage.local.set({ [s.TIME_LIMITS]: a }), await y(), console.log("[v0] Time limit set/updated:", o, t, "minutes");
+  await chrome.storage.local.set({ [s.TIME_LIMITS]: i }), await y(), console.log("[v0] Time limit set/updated:", o, t, "minutes");
 }
-const I = "__contentSuggestNotified__", Oe = 24 * 60 * 60 * 1e3;
-async function ae() {
+const E = "__contentSuggestNotified__", Oe = 24 * 60 * 60 * 1e3;
+async function ie() {
   try {
     const { [s.SETTINGS]: e } = await chrome.storage.sync.get(s.SETTINGS);
     return (e?.contentAnalysisSuppressionMinutes || 24 * 60) * 60 * 1e3;
@@ -464,37 +464,37 @@ async function ae() {
 async function Ae() {
   console.log("[v0] Initializing content analyzer module");
   try {
-    const { [I]: e = {} } = await chrome.storage.session.get(I), t = Date.now(), o = await ae();
+    const { [E]: e = {} } = await chrome.storage.session.get(E), t = Date.now(), o = await ie();
     let n = !1;
-    for (const a of Object.keys(e || {}))
-      (typeof e[a] != "number" || t - e[a] > o) && (delete e[a], n = !0);
-    n && await chrome.storage.session.set({ [I]: e });
+    for (const i of Object.keys(e || {}))
+      (typeof e[i] != "number" || t - e[i] > o) && (delete e[i], n = !0);
+    n && await chrome.storage.session.set({ [E]: e });
   } catch (e) {
     console.warn("[v0] Unable to prune notify cache:", e);
   }
 }
 async function be(e) {
   try {
-    const t = await ae(), { [I]: o = {} } = await chrome.storage.session.get(I), n = o?.[e], a = Date.now();
-    return n && a - n < t ? !1 : (await chrome.storage.session.set({
-      [I]: { ...o || {}, [e]: a }
+    const t = await ie(), { [E]: o = {} } = await chrome.storage.session.get(E), n = o?.[e], i = Date.now();
+    return n && i - n < t ? !1 : (await chrome.storage.session.set({
+      [E]: { ...o || {}, [e]: i }
     }), !0);
   } catch {
     return !0;
   }
 }
-async function Me(e) {
+async function Ne(e) {
   try {
     if (console.log("[v0] Content analysis result:", e), !await Ue() || !(e.classification === "distracting" && e.score > he) || !e?.url) return;
-    const t = C(e.url);
+    const t = G(e.url);
     if (!t) return;
     const { [s.BLACKLIST]: o = [] } = await chrome.storage.local.get(
       s.BLACKLIST
     );
-    if (o.some((i) => i.domain === t) || !await be(t))
+    if (o.some((a) => a.domain === t) || !await be(t))
       return;
-    const { createNotification: a } = await Promise.resolve().then(() => N);
-    await a({
+    const { createNotification: i } = await Promise.resolve().then(() => _);
+    await i({
       notificationId: `suggest-block-${t}`,
       type: "basic",
       title: "Site Potencialmente Distrativo",
@@ -513,26 +513,26 @@ async function y() {
   try {
     const e = await z(), t = JSON.stringify(e, (o, n) => {
       if (n && typeof n == "object" && !Array.isArray(n)) {
-        const a = {};
-        return Object.keys(n).sort().forEach((i) => {
-          a[i] = n[i];
-        }), a;
+        const i = {};
+        return Object.keys(n).sort().forEach((a) => {
+          i[a] = n[a];
+        }), i;
       }
       return n;
     });
     if (t === V)
       return;
     V = t, chrome.runtime.sendMessage({ type: f.STATE_UPDATED, payload: { state: e } }, (o) => {
-      const n = chrome.runtime.lastError, a = n?.message ?? "", r = [
+      const n = chrome.runtime.lastError, i = n?.message ?? "", r = [
         "Receiving end does not exist",
         "The message port closed before a response was received",
         "Could not establish connection. Receiving end does not exist",
         "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received"
-      ].some((c) => a === c || a.startsWith(c));
+      ].some((c) => i === c || i.startsWith(c));
       n && !r && console.warn("[v0] notifyStateUpdate lastError:", n.message);
     });
     try {
-      for (const o of M)
+      for (const o of N)
         try {
           o.postMessage({ type: f.STATE_UPDATED, payload: { state: e } });
         } catch (n) {
@@ -545,7 +545,7 @@ async function y() {
   }
 }
 async function Ue() {
-  const { getNotificationSetting: e } = await Promise.resolve().then(() => N);
+  const { getNotificationSetting: e } = await Promise.resolve().then(() => _);
   return await e();
 }
 async function z() {
@@ -566,7 +566,7 @@ async function z() {
     timeLimits: t[s.TIME_LIMITS] || [],
     dailyUsage: t[s.DAILY_USAGE] || {},
     pomodoro: t[s.POMODORO_STATUS] || {
-      config: w,
+      config: D,
       state: {
         phase: "idle",
         isPaused: !1,
@@ -578,32 +578,32 @@ async function z() {
     settings: o[s.SETTINGS] || T
   };
 }
-const M = /* @__PURE__ */ new Set();
+const N = /* @__PURE__ */ new Set();
 chrome.runtime?.onConnect?.addListener && chrome.runtime.onConnect.addListener((e) => {
   try {
-    M.add(e), z().then((t) => {
+    N.add(e), z().then((t) => {
       try {
         e.postMessage({ type: f.STATE_UPDATED, payload: { state: t } });
       } catch {
       }
     }).catch(() => {
     }), e.onDisconnect.addListener(() => {
-      M.delete(e);
+      N.delete(e);
     });
   } catch {
     try {
-      M.delete(e);
+      N.delete(e);
     } catch {
     }
   }
 });
-async function _e(e, t) {
+async function Me(e, t) {
   switch (console.log("[v0] DEBUG: Message handler - type:", e.type), console.log("[v0] DEBUG: Message handler - payload:", e.payload), console.log("[v0] DEBUG: Message handler - sender:", t), e.type) {
     case f.GET_INITIAL_STATE:
       return await z();
     case f.ADD_TO_BLACKLIST: {
       const o = e.payload?.domain;
-      return typeof o == "string" && await $(o), await y(), { success: !0 };
+      return typeof o == "string" && await K(o), await y(), { success: !0 };
     }
     case f.REMOVE_FROM_BLACKLIST: {
       const o = e.payload?.domain;
@@ -613,33 +613,33 @@ async function _e(e, t) {
       const o = e.payload;
       console.log("[v0] DEBUG: POMODORO_START - full payload:", JSON.stringify(o)), console.log("[v0] DEBUG: POMODORO_START - payload.config:", JSON.stringify(o?.config));
       const n = o?.config || o;
-      return console.log("[v0] DEBUG: POMODORO_START - extracted config:", JSON.stringify(n)), await Ge(n), { success: !0 };
+      return console.log("[v0] DEBUG: POMODORO_START - extracted config:", JSON.stringify(n)), await Ce(n), { success: !0 };
     }
     case f.POMODORO_STOP:
       return await ge(), { success: !0 };
     case f.POMODORO_PAUSE:
-      return await Ce(), { success: !0 };
+      return await Ge(), { success: !0 };
     case f.POMODORO_RESUME:
       return await Be(), { success: !0 };
     case f.START_BREAK:
       return await me(), { success: !0 };
     case f.TIME_LIMIT_SET: {
-      const o = e.payload, n = o?.domain, a = o?.dailyMinutes ?? o?.limitMinutes;
-      return typeof n == "string" && typeof a == "number" && await Ie(n, a), await y(), { success: !0 };
+      const o = e.payload, n = o?.domain, i = o?.dailyMinutes ?? o?.limitMinutes;
+      return typeof n == "string" && typeof i == "number" && await Ee(n, i), await y(), { success: !0 };
     }
     case f.CONTENT_ANALYSIS_RESULT:
-      return await Me(e.payload?.result), await y(), { success: !0 };
+      return await Ne(e.payload?.result), await y(), { success: !0 };
     case f.STATE_PATCH: {
       const o = e.payload ?? {}, n = o.patch?.settings ?? o.settings ?? o;
       if (!n || typeof n != "object")
         return { success: !1, error: "Invalid STATE_PATCH payload" };
-      const { [s.SETTINGS]: a } = await chrome.storage.sync.get(s.SETTINGS), i = { ...a ?? {}, ...n ?? {} }, r = JSON.stringify(a ?? {}), c = JSON.stringify(i);
-      return r === c ? { success: !0 } : (await chrome.storage.sync.set({ [s.SETTINGS]: i }), await y(), { success: !0 });
+      const { [s.SETTINGS]: i } = await chrome.storage.sync.get(s.SETTINGS), a = { ...i ?? {}, ...n ?? {} }, r = JSON.stringify(i ?? {}), c = JSON.stringify(a);
+      return r === c ? { success: !0 } : (await chrome.storage.sync.set({ [s.SETTINGS]: a }), await y(), { success: !0 });
     }
     case f.SITE_CUSTOMIZATION_UPDATED: {
       const { [s.SITE_CUSTOMIZATIONS]: o } = await chrome.storage.local.get(s.SITE_CUSTOMIZATIONS), n = e.payload;
-      let a = { ...o ?? {} };
-      return n && typeof n == "object" && !Array.isArray(n) && (n.domain && n.config ? a = { ...a, [String(n.domain)]: n.config } : a = { ...a, ...n }), await chrome.storage.local.set({ [s.SITE_CUSTOMIZATIONS]: a }), await y(), { success: !0 };
+      let i = { ...o ?? {} };
+      return n && typeof n == "object" && !Array.isArray(n) && (n.domain && n.config ? i = { ...i, [String(n.domain)]: n.config } : i = { ...i, ...n }), await chrome.storage.local.set({ [s.SITE_CUSTOMIZATIONS]: i }), await y(), { success: !0 };
     }
     case f.TOGGLE_ZEN_MODE: {
       const [o] = await chrome.tabs.query({ active: !0, currentWindow: !0 });
@@ -667,24 +667,24 @@ async function _e(e, t) {
     }
   }
 }
-const S = 1e3, h = 2e3, v = 1e3, D = 1e4;
+const S = 1e3, h = 2e3, w = 1e3, v = 1e4;
 let L = Promise.resolve();
-function K(e) {
+function q(e) {
   return L = L.then(e, e), L;
 }
 function J(e) {
   let t = 0;
   for (let n = 0; n < e.length; n++) {
-    const a = e.charCodeAt(n);
-    t = (t << 5) - t + a, t |= 0;
+    const i = e.charCodeAt(n);
+    t = (t << 5) - t + i, t |= 0;
   }
-  const o = Math.abs(t) % v;
+  const o = Math.abs(t) % w;
   return h + o;
 }
 async function se() {
-  console.log("[v0] Initializing blocker module"), await te(), await q();
+  console.log("[v0] Initializing blocker module"), await te(), await $();
 }
-async function ie() {
+async function ae() {
   console.log("[v0] Cleaning up all DNR rules...");
   try {
     const e = await chrome.declarativeNetRequest.getDynamicRules();
@@ -706,7 +706,7 @@ async function ie() {
     console.error("[v0] Error during DNR cleanup:", e);
   }
 }
-async function Ne() {
+async function _e() {
   console.log("=== DNR DEBUG STATUS ===");
   try {
     const e = await chrome.declarativeNetRequest.getDynamicRules(), t = await chrome.declarativeNetRequest.getSessionRules();
@@ -721,8 +721,8 @@ async function Ne() {
         "https://www.youtube.com",
         "https://www.youtube.com/watch?v=test"
       ];
-      console.log("Regex test results:"), n.forEach((a) => {
-        console.log(`  ${o.test(a) ? "✅" : "❌"} ${a}`);
+      console.log("Regex test results:"), n.forEach((i) => {
+        console.log(`  ${o.test(i) ? "✅" : "❌"} ${i}`);
       });
     }
   } catch (e) {
@@ -730,7 +730,7 @@ async function Ne() {
   }
   console.log("=== END DNR DEBUG ===");
 }
-async function $(e) {
+async function K(e) {
   const o = (await chrome.storage.local.get(
     s.BLACKLIST
   ))[s.BLACKLIST] ?? [], n = O(e);
@@ -739,70 +739,70 @@ async function $(e) {
     console.log("[v0] Domain already in blacklist:", n);
     return;
   }
-  const a = (r) => r, i = [
+  const i = (r) => r, a = [
     ...o,
-    { domain: a(n), addedAt: (/* @__PURE__ */ new Date()).toISOString() }
+    { domain: i(n), addedAt: (/* @__PURE__ */ new Date()).toISOString() }
   ];
   try {
     const r = o;
-    if (r.length === i.length && r.every((d, g) => d.domain === i[g].domain && d.addedAt === i[g].addedAt)) {
+    if (r.length === a.length && r.every((d, g) => d.domain === a[g].domain && d.addedAt === a[g].addedAt)) {
       console.log("[v0] addToBlacklist: no-op, blacklist identical");
       return;
     }
   } catch {
   }
-  await chrome.storage.local.set({ [s.BLACKLIST]: i }), await q(), await y(), console.log("[v0] Added to blacklist:", n);
+  await chrome.storage.local.set({ [s.BLACKLIST]: a }), await $(), await y(), console.log("[v0] Added to blacklist:", n);
 }
 async function re(e) {
   const o = (await chrome.storage.local.get(
     s.BLACKLIST
   ))[s.BLACKLIST] ?? [], n = O(e);
   if (!n) return;
-  const a = o.filter((i) => i.domain !== n);
-  if (a.length !== o.length) {
+  const i = o.filter((a) => a.domain !== n);
+  if (i.length !== o.length) {
     try {
-      if (a.length === o.length && a.every((r, c) => r.domain === o[c].domain && r.addedAt === o[c].addedAt)) {
+      if (i.length === o.length && i.every((r, c) => r.domain === o[c].domain && r.addedAt === o[c].addedAt)) {
         console.log("[v0] removeFromBlacklist: no-op, blacklist identical");
         return;
       }
     } catch {
     }
-    await chrome.storage.local.set({ [s.BLACKLIST]: a }), await q(), await y(), console.log("[v0] Removed from blacklist:", n);
+    await chrome.storage.local.set({ [s.BLACKLIST]: i }), await $(), await y(), console.log("[v0] Removed from blacklist:", n);
   }
 }
-async function q() {
+async function $() {
   console.log("[v0] DEBUG: Starting syncUserBlacklistRules...");
   const { [s.BLACKLIST]: e = [] } = await chrome.storage.local.get(
     s.BLACKLIST
   );
-  return console.log("[v0] DEBUG: Blacklist from storage:", e), K(async () => {
+  return console.log("[v0] DEBUG: Blacklist from storage:", e), q(async () => {
     console.log("[v0] DEBUG: Getting existing DNR rules...");
     const t = await chrome.declarativeNetRequest.getDynamicRules();
     console.log("[v0] DEBUG: Found", t.length, "existing DNR rules");
     const o = new Set(
       t.map((r) => r.id).filter(
-        (r) => r >= h && r < h + v || r >= h + D && r < h + D + v
+        (r) => r >= h && r < h + w || r >= h + v && r < h + v + w
       )
-    ), n = [], a = /* @__PURE__ */ new Set();
+    ), n = [], i = /* @__PURE__ */ new Set();
     for (const r of e) {
       const c = O(r.domain);
       if (!c) continue;
       let d = J(c), g = 0;
-      const l = v;
-      for (; a.has(d) || o.has(d); ) {
+      const l = w;
+      for (; i.has(d) || o.has(d); ) {
         if (g++, g >= l) {
           console.error(
             `[v0] Rule ID range exhausted for domain: ${c}. Consider increasing USER_BLACKLIST_RANGE or cleaning old rules.`
           );
           break;
         }
-        d++, d >= h + v && (d = h);
+        d++, d >= h + w && (d = h);
       }
       if (g >= l) {
         console.warn(`[v0] Skipping rule for ${c} - no free ID found`);
         continue;
       }
-      if (a.add(d), !o.has(d)) {
+      if (i.add(d), !o.has(d)) {
         const m = B(c);
         console.log("[v0] [DEBUG] Valid urlFilter for", c, ":", m);
         const R = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(c)}`);
@@ -820,7 +820,7 @@ async function q() {
             resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME]
           }
         });
-        const b = d + D;
+        const b = d + v;
         o.has(b) || n.push({
           id: b,
           priority: 1,
@@ -842,40 +842,40 @@ async function q() {
         });
       }
     }
-    const i = Array.from(o).filter(
-      (r) => !a.has(r) && !a.has(r - D)
+    const a = Array.from(o).filter(
+      (r) => !i.has(r) && !i.has(r - v)
     );
-    if (console.log("[v0] DEBUG: Rules to add:", n.length), console.log("[v0] DEBUG: Rules to remove:", i.length), n.length > 0 || i.length > 0) {
+    if (console.log("[v0] DEBUG: Rules to add:", n.length), console.log("[v0] DEBUG: Rules to remove:", a.length), n.length > 0 || a.length > 0) {
       const r = await ee();
       r && (console.log("[DNR-DEBUG] Blacklist domains:", e.map((l) => l.domain)), console.log("[DNR-DEBUG] Rules to add (with regex):", n.map((l) => ({
         id: l.id,
         regex: l.condition.regexFilter,
         domain: e.find((m) => J(m.domain) === l.id)?.domain
-      }))), console.log("[DNR-DEBUG] Rules to remove IDs:", i)), console.log("[v0] DEBUG: Updating DNR rules...");
+      }))), console.log("[DNR-DEBUG] Rules to remove IDs:", a)), console.log("[v0] DEBUG: Updating DNR rules...");
       try {
         await chrome.declarativeNetRequest.updateDynamicRules({
-          removeRuleIds: i,
+          removeRuleIds: a,
           addRules: n
         }), console.log("[v0] DEBUG: DNR rules successfully applied");
         const l = await chrome.declarativeNetRequest.getDynamicRules();
         console.log("[v0] DEBUG: Current DNR rules count:", l.length), console.log("[v0] DEBUG: Current DNR rules:", l);
       } catch (l) {
-        throw console.error("[v0] ERROR: DNR updateDynamicRules FAILED:", l), console.error("[v0] ERROR: Failed rules:", n), console.error("[v0] ERROR: Attempted to remove:", i), l;
+        throw console.error("[v0] ERROR: DNR updateDynamicRules FAILED:", l), console.error("[v0] ERROR: Failed rules:", n), console.error("[v0] ERROR: Attempted to remove:", a), l;
       }
-      const c = await chrome.declarativeNetRequest.getDynamicRules(), d = c.filter((l) => l.id >= h && l.id < h + v), g = c.filter((l) => l.id >= S && l.id < h);
+      const c = await chrome.declarativeNetRequest.getDynamicRules(), d = c.filter((l) => l.id >= h && l.id < h + w), g = c.filter((l) => l.id >= S && l.id < h);
       if (console.log(`[v0] DNR Verification: ${d.length} blacklist rules, ${g.length} pomodoro rules`), n.length > 0 && d.length === 0 && console.error("[v0] CRITICAL: Rules were added but not found in DNR!"), r) {
         const l = await chrome.declarativeNetRequest.getDynamicRules();
         console.log("[DNR-DEBUG] All dynamic rules after sync:", l), console.log("[DNR-DEBUG] Total rules count:", l.length), console.log("[DNR-DEBUG] Rules by type:", {
           pomodoro: l.filter((m) => m.id >= S && m.id < h).length,
-          blacklist: l.filter((m) => m.id >= h && m.id < h + v).length,
-          other: l.filter((m) => m.id < S || m.id >= h + v).length
+          blacklist: l.filter((m) => m.id >= h && m.id < h + w).length,
+          other: l.filter((m) => m.id < S || m.id >= h + w).length
         });
       }
       console.log(
         "[v0] User blocking rules synced:",
         n.length,
         "rules added,",
-        i.length,
+        a.length,
         "rules removed."
       );
     } else
@@ -892,7 +892,7 @@ async function Y() {
   }
   const t = [];
   return e.forEach((o, n) => {
-    const a = O(o.domain), i = B(a), r = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(a)}`);
+    const i = O(o.domain), a = B(i), r = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(i)}`);
     t.push({
       id: S + n,
       priority: 2,
@@ -904,11 +904,11 @@ async function Y() {
         }
       },
       condition: {
-        urlFilter: i,
+        urlFilter: a,
         resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME]
       }
     }), t.push({
-      id: S + n + D,
+      id: S + n + v,
       priority: 2,
       action: {
         type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
@@ -919,16 +919,16 @@ async function Y() {
         ]
       },
       condition: {
-        urlFilter: i,
+        urlFilter: a,
         resourceTypes: [
           chrome.declarativeNetRequest.ResourceType.MAIN_FRAME,
           chrome.declarativeNetRequest.ResourceType.SUB_FRAME
         ]
       }
     });
-  }), K(async () => {
-    const n = (await chrome.declarativeNetRequest.getDynamicRules()).map((i) => i.id).filter(
-      (i) => i >= S && i < h || i >= S + D && i < h + D
+  }), q(async () => {
+    const n = (await chrome.declarativeNetRequest.getDynamicRules()).map((a) => a.id).filter(
+      (a) => a >= S && a < h || a >= S + v && a < h + v
     );
     console.log("[v0] [DEBUG] Pomodoro rules to add:", JSON.stringify(t, null, 2));
     try {
@@ -936,11 +936,11 @@ async function Y() {
         removeRuleIds: n,
         addRules: t
       }), console.log("[v0] DEBUG: Pomodoro DNR rules successfully applied");
-    } catch (i) {
-      throw console.error("[v0] ERROR: Pomodoro DNR updateDynamicRules FAILED:", i), console.error("[v0] ERROR: Failed Pomodoro rules:", t), console.error("[v0] ERROR: Attempted to remove Pomodoro rules:", n), i;
+    } catch (a) {
+      throw console.error("[v0] ERROR: Pomodoro DNR updateDynamicRules FAILED:", a), console.error("[v0] ERROR: Failed Pomodoro rules:", t), console.error("[v0] ERROR: Attempted to remove Pomodoro rules:", n), a;
     }
-    const a = await chrome.declarativeNetRequest.getDynamicRules();
-    console.log("[v0] [DEBUG] All dynamic rules after Pomodoro enable:", JSON.stringify(a, null, 2)), console.log(
+    const i = await chrome.declarativeNetRequest.getDynamicRules();
+    console.log("[v0] [DEBUG] All dynamic rules after Pomodoro enable:", JSON.stringify(i, null, 2)), console.log(
       "[v0] Enabling Pomodoro blocking for",
       e.length,
       "sites."
@@ -948,9 +948,9 @@ async function Y() {
   });
 }
 async function j() {
-  return K(async () => {
+  return q(async () => {
     const t = (await chrome.declarativeNetRequest.getDynamicRules()).map((o) => o.id).filter(
-      (o) => o >= S && o < h || o >= S + D && o < h + D
+      (o) => o >= S && o < h || o >= S + v && o < h + v
     );
     if (t.length > 0)
       try {
@@ -968,16 +968,17 @@ async function j() {
 }
 const ce = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  addToBlacklist: $,
-  cleanupAllDNRRules: ie,
-  debugDNRStatus: Ne,
+  addToBlacklist: K,
+  cleanupAllDNRRules: ae,
+  debugDNRStatus: _e,
   disablePomodoroBlocking: j,
   enablePomodoroBlocking: Y,
   initializeBlocker: se,
   removeFromBlacklist: re
 }, Symbol.toStringTag, { value: "Module" }));
 function le() {
-  return chrome.runtime.getURL("icon48.png");
+  const e = "icons/icon48.png", t = chrome.runtime.getURL(e);
+  return console.debug("[v0][Notifications] Icon URL resolved:", { iconPath: e, iconUrl: t }), t;
 }
 async function de() {
   try {
@@ -1025,27 +1026,46 @@ async function ue() {
   }
 }
 async function U(e) {
+  console.log("[v0][Notifications] Creating notification:", {
+    notificationId: e.notificationId,
+    title: e.title,
+    type: e.type || "basic",
+    iconUrl: e.iconUrl || "(will use default)"
+  });
   try {
-    if (!await de())
+    console.debug("[v0][Notifications] Verifying notification permission...");
+    const t = await de();
+    if (console.debug("[v0][Notifications] Permission check result:", { hasPermission: t }), !t)
       return console.warn("[v0][Notifications] Permission not available, skipping notification:", {
         id: e.notificationId,
         title: e.title
       }), null;
-    if (!await ue())
+    console.debug("[v0][Notifications] Checking notification settings...");
+    const o = await ue();
+    if (console.debug("[v0][Notifications] Notification setting result:", { notificationsEnabled: o }), !o)
       return console.debug("[v0][Notifications] Notifications disabled in settings, skipping:", {
         id: e.notificationId,
         title: e.title
       }), null;
-    const n = {
+    const n = e.iconUrl || le(), i = {
       type: e.type || "basic",
-      iconUrl: e.iconUrl || le(),
+      iconUrl: n,
       title: e.title,
       message: e.message
     };
-    e.buttons && e.buttons.length > 0 && (n.buttons = e.buttons), e.requireInteraction !== void 0 && (n.requireInteraction = e.requireInteraction), e.priority !== void 0 && (n.priority = e.priority);
+    e.buttons && e.buttons.length > 0 && (i.buttons = e.buttons), e.requireInteraction !== void 0 && (i.requireInteraction = e.requireInteraction), e.priority !== void 0 && (i.priority = e.priority), console.log("[v0][Notifications] Notification options prepared:", {
+      notificationId: e.notificationId,
+      type: i.type,
+      iconUrl: i.iconUrl,
+      title: i.title,
+      messageLength: i.message?.length || 0,
+      hasButtons: (i.buttons?.length || 0) > 0,
+      requireInteraction: i.requireInteraction,
+      priority: i.priority
+    }), console.debug("[v0][Notifications] Calling chrome.notifications.create...");
     const a = await chrome.notifications.create(
       e.notificationId,
-      n
+      i
     );
     return console.log("[v0][Notifications] Notification created successfully:", {
       id: a,
@@ -1063,7 +1083,7 @@ async function U(e) {
     }), null;
   }
 }
-const N = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const _ = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   createNotification: U,
   getNotificationIconUrl: le,
@@ -1080,32 +1100,32 @@ async function Pe() {
     const { [s.POMODORO_STATUS]: e } = await chrome.storage.local.get(s.POMODORO_STATUS);
     if (!e?.state || e.state.phase === "idle")
       return;
-    const t = e.state, o = e.config || w;
+    const t = e.state, o = e.config || D;
     if (!t.endsAt) {
       console.log("[v0] Pomodoro recovery: No endsAt timestamp found, stopping timer"), await ge();
       return;
     }
-    const n = /* @__PURE__ */ new Date(), a = new Date(t.endsAt), i = Math.max(0, a.getTime() - n.getTime());
-    if (i <= 0) {
+    const n = /* @__PURE__ */ new Date(), i = new Date(t.endsAt), a = Math.max(0, i.getTime() - n.getTime());
+    if (a <= 0) {
       console.log("[v0] Pomodoro recovery: Timer should have ended, triggering alarm"), await W();
       return;
     }
     const r = {
       ...t,
-      remainingMs: i,
-      endsAt: a.toISOString()
+      remainingMs: a,
+      endsAt: i.toISOString()
     };
     await chrome.storage.local.set({
       [s.POMODORO_STATUS]: { config: o, state: r }
     });
-    const c = i / (60 * 1e3), d = i < 6e4 ? 0 : Math.ceil(i / (60 * 1e3));
-    i < 6e4 ? await chrome.alarms.create(p.POMODORO, { delayInMinutes: 0 }) : await chrome.alarms.create(p.POMODORO, { delayInMinutes: c }), t.phase === "focus" && await Y(), console.log(`[v0] Pomodoro recovery: Resumed timer with ${d} minutes remaining`);
+    const c = a / (60 * 1e3), d = a < 6e4 ? 0 : Math.ceil(a / (60 * 1e3));
+    a < 6e4 ? await chrome.alarms.create(p.POMODORO, { delayInMinutes: 0 }) : await chrome.alarms.create(p.POMODORO, { delayInMinutes: c }), t.phase === "focus" && await Y(), console.log(`[v0] Pomodoro recovery: Resumed timer with ${d} minutes remaining`);
   } catch (e) {
     console.error("[v0] Pomodoro recovery failed:", e);
   }
 }
-async function Ge(e) {
-  const { [s.POMODORO_STATUS]: t } = await chrome.storage.local.get(s.POMODORO_STATUS), o = t?.config || w, n = {
+async function Ce(e) {
+  const { [s.POMODORO_STATUS]: t } = await chrome.storage.local.get(s.POMODORO_STATUS), o = t?.config || D, n = {
     ...o,
     ...e
   };
@@ -1116,12 +1136,12 @@ async function Ge(e) {
     focusMinutes: n.focusMinutes,
     shortBreakMinutes: n.shortBreakMinutes
   });
-  const a = /* @__PURE__ */ new Date(), i = new Date(a.getTime() + n.focusMinutes * 60 * 1e3), r = {
+  const i = /* @__PURE__ */ new Date(), a = new Date(i.getTime() + n.focusMinutes * 60 * 1e3), r = {
     phase: "focus",
     isPaused: !1,
     cycleIndex: (t?.state?.cycleIndex || 0) + 1,
-    startedAt: a.toISOString(),
-    endsAt: i.toISOString(),
+    startedAt: i.toISOString(),
+    endsAt: a.toISOString(),
     remainingMs: n.focusMinutes * 60 * 1e3
   };
   await chrome.storage.local.set({ [s.POMODORO_STATUS]: { config: n, state: r } }), console.log("[v0] Creating Pomodoro alarm with delayInMinutes:", n.focusMinutes), await chrome.alarms.create(p.POMODORO, { delayInMinutes: n.focusMinutes }), await chrome.alarms.create("pomodoro-keepalive", { delayInMinutes: 5, periodInMinutes: 5 }), await Y(), await y();
@@ -1143,19 +1163,19 @@ async function ge() {
     isPaused: !1,
     cycleIndex: 0,
     remainingMs: 0
-  }, o = e?.config || w;
+  }, o = e?.config || D;
   await chrome.storage.local.set({ [s.POMODORO_STATUS]: { config: o, state: t } }), await chrome.alarms.clear(p.POMODORO), await chrome.alarms.clear("pomodoro-keepalive"), await j(), await y(), console.log("[v0] Pomodoro stopped");
 }
-async function Ce() {
+async function Ge() {
   const { [s.POMODORO_STATUS]: e } = await chrome.storage.local.get(s.POMODORO_STATUS);
   if (!e?.state) return;
-  const t = e.state, o = e.config || w;
+  const t = e.state, o = e.config || D;
   if (t.phase === "idle" || t.isPaused) return;
-  const n = /* @__PURE__ */ new Date(), a = t.endsAt ? new Date(t.endsAt) : n, i = Math.max(0, a.getTime() - n.getTime()), r = {
+  const n = /* @__PURE__ */ new Date(), i = t.endsAt ? new Date(t.endsAt) : n, a = Math.max(0, i.getTime() - n.getTime()), r = {
     ...t,
     isPaused: !0,
     pausedAt: n.toISOString(),
-    remainingMs: i,
+    remainingMs: a,
     endsAt: void 0
     // Remove endsAt pois não há mais deadline
   };
@@ -1166,22 +1186,22 @@ async function Ce() {
 async function Be() {
   const { [s.POMODORO_STATUS]: e } = await chrome.storage.local.get(s.POMODORO_STATUS);
   if (!e?.state || !e.state.isPaused) return;
-  const t = e.state, o = e.config || w, n = /* @__PURE__ */ new Date(), a = t.remainingMs || 0;
-  if (a <= 0) {
+  const t = e.state, o = e.config || D, n = /* @__PURE__ */ new Date(), i = t.remainingMs || 0;
+  if (i <= 0) {
     await W();
     return;
   }
-  const i = new Date(n.getTime() + a), r = {
+  const a = new Date(n.getTime() + i), r = {
     ...t,
     isPaused: !1,
     pausedAt: void 0,
-    endsAt: i.toISOString(),
-    remainingMs: a
+    endsAt: a.toISOString(),
+    remainingMs: i
   };
   await chrome.storage.local.set({
     [s.POMODORO_STATUS]: { config: o, state: r }
   });
-  const c = Math.ceil(a / (60 * 1e3));
+  const c = Math.ceil(i / (60 * 1e3));
   await chrome.alarms.create(p.POMODORO, {
     delayInMinutes: Math.max(c, 0.1)
     // Min 6 segundos
@@ -1193,36 +1213,36 @@ async function Be() {
 async function me() {
   const { [s.POMODORO_STATUS]: e } = await chrome.storage.local.get(s.POMODORO_STATUS);
   if (!e?.state || e.state.phase !== "focus_complete") return;
-  const t = e.state, o = e.config || w, n = t.pendingBreakType || "short", a = n === "long" ? o.longBreakMinutes : o.shortBreakMinutes, i = /* @__PURE__ */ new Date(), r = new Date(i.getTime() + a * 60 * 1e3), c = {
+  const t = e.state, o = e.config || D, n = t.pendingBreakType || "short", i = n === "long" ? o.longBreakMinutes : o.shortBreakMinutes, a = /* @__PURE__ */ new Date(), r = new Date(a.getTime() + i * 60 * 1e3), c = {
     ...t,
     phase: n === "long" ? "long_break" : "short_break",
     isPaused: !1,
-    startedAt: i.toISOString(),
+    startedAt: a.toISOString(),
     endsAt: r.toISOString(),
-    remainingMs: a * 60 * 1e3,
+    remainingMs: i * 60 * 1e3,
     pendingBreakType: void 0
   };
   await chrome.storage.local.set({
     [s.POMODORO_STATUS]: { config: o, state: c }
   }), await chrome.alarms.create(p.POMODORO, {
-    delayInMinutes: a
+    delayInMinutes: i
   }), await j(), await y(), console.log("[v0] Break started:", c);
 }
 async function W() {
   const { [s.POMODORO_STATUS]: e } = await chrome.storage.local.get(s.POMODORO_STATUS);
   if (!e?.state) return;
-  const t = e.state, o = e.config || w;
+  const t = e.state, o = e.config || D;
   if (t.phase === "focus") {
-    const a = t.cycleIndex % o.cyclesBeforeLongBreak === 0 ? "long" : "short", i = {
+    const i = t.cycleIndex % o.cyclesBeforeLongBreak === 0 ? "long" : "short", a = {
       ...t,
       phase: "focus_complete",
       isPaused: !1,
       remainingMs: 0,
       endsAt: void 0,
-      pendingBreakType: a
+      pendingBreakType: i
     };
     await chrome.storage.local.set({
-      [s.POMODORO_STATUS]: { config: o, state: i }
+      [s.POMODORO_STATUS]: { config: o, state: a }
     }), await chrome.alarms.clear("pomodoro-keepalive"), await y();
     try {
       await U({
@@ -1248,8 +1268,8 @@ async function W() {
         title: "Ciclo Completo!",
         message: "Pronto para outra sessão de foco?"
       });
-    } catch (a) {
-      console.error("[v0] Failed to create pomodoro-cycle-complete notification:", a);
+    } catch (i) {
+      console.error("[v0] Failed to create pomodoro-cycle-complete notification:", i);
     }
     console.log("[v0] Pomodoro: Break → Idle");
   }
@@ -1272,8 +1292,8 @@ async function Fe() {
   console.log("[v0] Daily sync triggered (Firebase integration pending)");
   const { [s.DAILY_USAGE]: e = {} } = await chrome.storage.local.get(s.DAILY_USAGE), t = (/* @__PURE__ */ new Date()).toISOString().split("T")[0], o = e[t];
   if (!o) return;
-  const n = Object.values(o).reduce((i, r) => i + r, 0), a = Object.entries(o).sort(([, i], [, r]) => r - i).slice(0, 5).map(([i, r]) => ({ domain: i, time: r }));
-  console.log("[v0] Daily summary:", { totalTime: n, topSites: a });
+  const n = Object.values(o).reduce((a, r) => a + r, 0), i = Object.entries(o).sort(([, a], [, r]) => r - a).slice(0, 5).map(([a, r]) => ({ domain: a, time: r }));
+  console.log("[v0] Daily summary:", { totalTime: n, topSites: i });
 }
 console.log("[v0] Service Worker starting up...");
 console.log("[v0] DEBUG: Extension version:", chrome.runtime.getManifest().version);
@@ -1291,7 +1311,7 @@ async function fe() {
     console.error("[v0] Failed to initialize Blocker:", e);
   }
   try {
-    console.log("[v0] DEBUG: Initializing Usage Tracker module..."), await De(), console.log("[v0] DEBUG: ✅ Usage Tracker module initialized successfully");
+    console.log("[v0] DEBUG: Initializing Usage Tracker module..."), await ve(), console.log("[v0] DEBUG: ✅ Usage Tracker module initialized successfully");
   } catch (e) {
     console.error("[v0] Failed to initialize Usage Tracker:", e);
   }
@@ -1314,7 +1334,7 @@ async function fe() {
 }
 async function xe() {
   try {
-    const { verifyNotificationPermission: e, createNotification: t } = await Promise.resolve().then(() => N);
+    const { verifyNotificationPermission: e, createNotification: t } = await Promise.resolve().then(() => _);
     await e() ? (console.log("[v0] Notification permission granted"), await t({
       notificationId: "welcome-notification",
       type: "basic",
@@ -1356,12 +1376,12 @@ async function Q() {
   }
 }
 function ze(e) {
-  return console.log("[v0] Extension installed/updated:", e.reason), Ke(e);
+  return console.log("[v0] Extension installed/updated:", e.reason), qe(e);
 }
-async function Ke(e) {
+async function qe(e) {
   console.log("[v0] Extension installed/updated:", e.reason), console.log("[v0] DEBUG: Installation reason:", e.reason);
   try {
-    console.log("[v0] DEBUG: Cleaning up old DNR rules..."), await ie(), console.log("[v0] DEBUG: ✅ DNR cleanup completed");
+    console.log("[v0] DEBUG: Cleaning up old DNR rules..."), await ae(), console.log("[v0] DEBUG: ✅ DNR cleanup completed");
   } catch (t) {
     console.error("[v0] Failed to cleanup DNR rules:", t);
   }
@@ -1411,7 +1431,7 @@ async function Ke(e) {
         }
       },
       pomodoro: {
-        config: w,
+        config: D,
         state: {
           phase: "idle",
           isPaused: !1,
@@ -1452,27 +1472,27 @@ globalThis.verifyDNRRules = async () => {
   console.log("=== DNR Rules Verification ==="), console.log("Dynamic rules:", e.length), console.log("Session rules:", t.length), console.log(`
 Dynamic rules detail:`, e), console.log(`
 Session rules detail:`, t);
-  const o = "https://www.youtube.com/", n = e.filter((a) => {
-    if (a.condition.regexFilter)
+  const o = "https://www.youtube.com/", n = e.filter((i) => {
+    if (i.condition.regexFilter)
       try {
-        return new RegExp(a.condition.regexFilter).test(o);
-      } catch (i) {
-        return console.error("Invalid regex in rule", a.id, i), !1;
+        return new RegExp(i.condition.regexFilter).test(o);
+      } catch (a) {
+        return console.error("Invalid regex in rule", i.id, a), !1;
       }
     return !1;
   });
   return console.log(`
 Rules matching ${o}:`, n), { dynamic: e, session: t, matching: n };
 };
-function $e() {
+function Ke() {
   return console.log("[v0] Extension started on browser startup"), fe();
 }
-function qe() {
-  chrome.runtime.onInstalled.addListener(ze), chrome.runtime.onStartup.addListener($e), chrome.storage.onChanged.addListener((e, t) => {
+function $e() {
+  chrome.runtime.onInstalled.addListener(ze), chrome.runtime.onStartup.addListener(Ke), chrome.storage.onChanged.addListener((e, t) => {
     console.log(`[v0] Storage changed in ${t}:`, e), y();
   }), chrome.runtime.onMessage.addListener((e, t, o) => {
     try {
-      return console.log("[v0] Message received:", e?.type, e?.payload), console.log("[v0] DEBUG: Message sender:", t), console.log("[v0] DEBUG: Message ID:", e?.id), console.log("[v0] DEBUG: Message timestamp:", e?.ts), Promise.resolve(_e(e, t)).then((n) => {
+      return console.log("[v0] Message received:", e?.type, e?.payload), console.log("[v0] DEBUG: Message sender:", t), console.log("[v0] DEBUG: Message ID:", e?.id), console.log("[v0] DEBUG: Message timestamp:", e?.ts), Promise.resolve(Me(e, t)).then((n) => {
         console.log("[v0] DEBUG: Message response:", n), o(n);
       }).catch((n) => {
         console.error("[v0] Error handling message:", n), o({ error: n?.message ?? String(n) });
@@ -1484,12 +1504,12 @@ function qe() {
     try {
       if (console.log("[v0] Notification button clicked:", e, t), e.startsWith("suggest-block-") && t === 0) {
         const o = e.replace("suggest-block-", "");
-        o && (await $(o), console.log(`[v0] Added ${o} to blacklist from notification.`));
+        o && (await K(o), console.log(`[v0] Added ${o} to blacklist from notification.`));
       } else e === "pomodoro-focus-complete" && t === 0 && (await me(), console.log("[v0] Break started from notification"));
     } finally {
       chrome.notifications.clear(e);
     }
   });
 }
-qe();
+$e();
 console.log("[v0] Service Worker loaded and listeners attached.");
