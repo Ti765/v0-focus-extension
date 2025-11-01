@@ -6,6 +6,37 @@ import { MESSAGE } from "../shared/types";
 import DOMPurify from "dompurify";
 
 // ─────────────────────────────────────────────────────────────
+// Updated YouTube selectors for 2025 layout
+// ─────────────────────────────────────────────────────────────
+const YOUTUBE_SELECTORS = {
+  hideHomepage: [
+    'ytd-rich-grid-renderer',              // Main video grid
+    'ytd-browse[page-subtype="home"]',     // Home container
+    '#contents.ytd-rich-grid-renderer'     // Grid contents
+  ],
+  
+  hideShorts: [
+    'ytd-reel-shelf-renderer',             // Shorts shelf on home
+    'ytd-shorts',                          // Shorts player
+    'ytd-rich-shelf-renderer[is-shorts]',  // Shorts shelf
+    '[is-shorts]',                         // Any shorts element
+    'a[href^="/shorts/"]'                  // Shorts links
+  ],
+  
+  hideComments: [
+    '#comments',                           // Main comments container
+    'ytd-comments',                        // Comments component
+    '#comment-teaser'                      // Comment teaser
+  ],
+  
+  hideRecommendations: [
+    '#secondary',                          // Main sidebar
+    '#related',                            // Related videos
+    'ytd-watch-next-secondary-results-renderer' // Modern renderer
+  ]
+};
+
+// ─────────────────────────────────────────────────────────────
 // Anti-reinjeção: marca que o CS já está presente
 // ─────────────────────────────────────────────────────────────
 (window as any).v0ContentScriptInjected = true;
@@ -52,8 +83,17 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
       sendResponse?.({ success: true });
       return true; // mantém a porta aberta caso algo seja async
     }
+    
+    if (message?.type === MESSAGE.SITE_CUSTOMIZATION_UPDATED) {
+      const payload = (message as any).payload;
+      if (payload?.domain === 'youtube.com' && window.location.hostname.includes('youtube.com')) {
+        applyYouTubeCustomization(payload.config);
+        sendResponse?.({ success: true });
+        return true;
+      }
+    }
   } catch (e) {
-    console.warn("[v0][CS] TOGGLE_ZEN_MODE failed:", e);
+    console.warn("[v0][CS] Message handler failed:", e);
     sendResponse?.({ success: false, error: String(e) });
   }
   return false;
@@ -87,6 +127,17 @@ if (document.readyState === "complete" || document.readyState === "interactive")
   analyzePageContent();
 } else {
   document.addEventListener("DOMContentLoaded", analyzePageContent, { once: true });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Initialize YouTube customizations
+// ─────────────────────────────────────────────────────────────
+if (window.location.hostname.includes('youtube.com')) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => loadAndApplyYouTubeCustomization(), { once: true });
+  } else {
+    loadAndApplyYouTubeCustomization();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -173,6 +224,71 @@ async function analyzeText(text: string, url: string): Promise<ContentAnalysisRe
     },
     flagged: classification === "distracting",
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// YouTube Customization Functions
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Applies YouTube-specific customizations based on user preferences
+ */
+function applyYouTubeCustomization(config: any) {
+  const selectorsToHide: string[] = [];
+  
+  // Build selector list based on preferences
+  if (config.hideHomepage) {
+    selectorsToHide.push(...YOUTUBE_SELECTORS.hideHomepage);
+  }
+  if (config.hideShorts) {
+    selectorsToHide.push(...YOUTUBE_SELECTORS.hideShorts);
+  }
+  if (config.hideComments) {
+    selectorsToHide.push(...YOUTUBE_SELECTORS.hideComments);
+  }
+  if (config.hideRecommendations) {
+    selectorsToHide.push(...YOUTUBE_SELECTORS.hideRecommendations);
+  }
+  
+  // Remove previous style if exists
+  const existingStyle = document.getElementById('v0-youtube-customization');
+  if (existingStyle) {
+    existingStyle.remove();
+  }
+  
+  // Apply new styles
+  if (selectorsToHide.length > 0) {
+    const style = document.createElement('style');
+    style.id = 'v0-youtube-customization';
+    style.textContent = selectorsToHide
+      .map(sel => `${sel} { display: none !important; }`)
+      .join('\n');
+    
+    document.head.appendChild(style);
+  }
+}
+
+/**
+ * Loads and applies YouTube customizations from storage
+ */
+async function loadAndApplyYouTubeCustomization() {
+  // Only run on YouTube
+  if (!window.location.hostname.includes('youtube.com')) {
+    return;
+  }
+  
+  try {
+    const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } = 
+      await chrome.storage.local.get(STORAGE_KEYS.SITE_CUSTOMIZATIONS);
+    
+    const youtubeConfig = siteCustomizations?.['youtube.com'];
+    if (youtubeConfig) {
+      applyYouTubeCustomization(youtubeConfig);
+      console.log('[v0][CS] YouTube customization applied:', youtubeConfig);
+    }
+  } catch (e) {
+    console.error('[v0][CS] Failed to load YouTube customization:', e);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

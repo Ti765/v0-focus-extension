@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useStore } from "../store";
 import { formatTime } from "../formatTime";
 import { Play, Square, Clock, Pause, Coffee } from "lucide-react";
@@ -23,7 +23,71 @@ export default function PomodoroTimer() {
 
   const phase = pomodoro.state.phase;
   const isPaused = pomodoro.state.isPaused;
-  const remainingSeconds = Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000);
+  
+  // Local state for countdown display
+  const [displaySeconds, setDisplaySeconds] = useState(
+    Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000)
+  );
+  const intervalRef = useRef<number>();
+  // Ref to access latest pomodoro state without causing re-renders
+  const pomodoroStateRef = useRef(pomodoro.state);
+
+  // Keep ref in sync with latest pomodoro state
+  useEffect(() => {
+    pomodoroStateRef.current = pomodoro.state;
+  }, [pomodoro.state]);
+
+  useEffect(() => {
+    // Clear any previous interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = undefined;
+    }
+
+    // Run interval for all active countdown phases (not idle, not paused)
+    const isActivePhase = pomodoro.state.phase !== 'idle' && !pomodoro.state.isPaused;
+    
+    if (isActivePhase) {
+      // Initialize display from current remainingMs (only once, no reset)
+      const initialSeconds = Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000);
+      setDisplaySeconds(initialSeconds);
+      
+      // Create interval that computes remaining time on each tick
+      intervalRef.current = window.setInterval(() => {
+        // Read latest state from ref to avoid stale closures
+        const state = pomodoroStateRef.current;
+        
+        // Compute remaining time: prefer endsAt (most accurate) or fallback to remainingMs
+        let currentMs = 0;
+        if (state.endsAt) {
+          // Active phase: compute from endsAt timestamp (most accurate)
+          const now = Date.now();
+          const endsAtTime = new Date(state.endsAt).getTime();
+          currentMs = Math.max(0, endsAtTime - now);
+        } else if (state.remainingMs !== undefined) {
+          // Fallback to remainingMs (e.g., paused state)
+          currentMs = state.remainingMs;
+        }
+        
+        // Compute seconds and update display
+        const computedSeconds = Math.max(0, Math.ceil(currentMs / 1000));
+        setDisplaySeconds(computedSeconds);
+      }, 1000);
+    } else {
+      // For idle or paused states, just update display once (no interval)
+      setDisplaySeconds(Math.ceil((pomodoro.state.remainingMs ?? 0) / 1000));
+    }
+    
+    // Cleanup function prevents memory leaks
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = undefined;
+      }
+    };
+  }, [pomodoro.state.phase, pomodoro.state.isPaused]);
+
+  const remainingSeconds = displaySeconds;
   const cycleText = `Ciclo ${pomodoro.state.cycleIndex + 1} de ${pomodoro.config.cyclesBeforeLongBreak}`;
 
   const handleStart = () => {

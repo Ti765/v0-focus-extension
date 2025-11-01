@@ -409,14 +409,14 @@ async function checkTimeLimit(domain: string, totalSecondsToday: number) {
           `[v0] Time limit reached for ${domain}. Session block rule ${ruleId} added.`
         );
 
-      if (await notificationsAllowed()) {
-        chrome.notifications.create(`limit-exceeded-${domain}`, {
-          type: "basic",
-          iconUrl: "icons/icon48.png",
-          title: "Limite de Tempo Atingido",
-          message: `Você atingiu o limite de ${limitMinutes} minutos em ${domain} hoje.`,
-        });
-      }
+      // Use centralized notification helper
+      const { createNotification } = await import("./notification-helper");
+      await createNotification({
+        notificationId: `limit-exceeded-${domain}`,
+        type: "basic",
+        title: "Limite de Tempo Atingido",
+        message: `Você atingiu o limite de ${limitMinutes} minutos em ${domain} hoje.`,
+      });
     } catch (e) {
       console.error(`[v0] Error updating session rule for time limit on ${domain}:`, e);
     }

@@ -109,11 +109,11 @@ export async function handleContentAnalysisResult(result: ContentAnalysisResult)
       return;
     }
 
-    // Cria notificação com ação para bloquear
-    const notificationId = `suggest-block-${domain}`;
-    await chrome.notifications.create(notificationId, {
+    // Cria notificação com ação para bloquear usando centralized helper
+    const { createNotification } = await import("./notification-helper");
+    await createNotification({
+      notificationId: `suggest-block-${domain}`,
       type: "basic",
-      iconUrl: "icons/icon48.png",
       title: "Site Potencialmente Distrativo",
       message: `${domain} parece ser distrativo. Deseja adicioná-lo à sua lista de bloqueio?`,
       buttons: [{ title: "Sim, bloquear" }, { title: "Não, obrigado" }],

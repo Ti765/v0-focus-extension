@@ -1,16 +1,8 @@
 import { STORAGE_KEYS, ALARM_NAMES, DEFAULT_POMODORO_CONFIG } from "../../shared/constants";
-import type { PomodoroState, PomodoroConfig, UserSettings } from "../../shared/types";
+import type { PomodoroState, PomodoroConfig } from "../../shared/types";
 import { enablePomodoroBlocking, disablePomodoroBlocking } from "./blocker";
 import { notifyStateUpdate } from "./message-handler";
-
-/**
- * Helper function to get notification setting from storage
- * Centralizes the schema handling for notification preferences
- */
-async function getNotificationSetting(): Promise<boolean> {
-  const settings = (await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS] as UserSettings | undefined;
-  return settings?.notifications ?? settings?.notificationsEnabled ?? false;
-}
+import { createNotification } from "./notification-helper";
 
 export async function initializePomodoro() {
   console.log("[v0] Initializing Pomodoro module");
@@ -137,24 +129,19 @@ export async function startPomodoro(config?: Partial<PomodoroConfig>) {
   await enablePomodoroBlocking();
   await notifyStateUpdate();
 
-  // Use notifications field if available in settings via storage sync
-  const notifyEnabled = await getNotificationSetting();
-  
-  console.log('[v0] Notification settings:', { notifyEnabled });
-
-  if (notifyEnabled) {
-    try {
-      await chrome.notifications.create("pomodoro-start", {
-        type: "basic",
-        iconUrl: "icons/icon48.png",
-        title: "Pomodoro Iniciado",
-        message: `Foco por ${pomodoroConfig.focusMinutes} minutos. Mantenha o foco!`,
-      });
-      console.log('[v0] Notification created successfully');
-    } catch (error) {
-      console.error('[v0] Failed to create notification:', error);
-    }
+  // Create start notification using centralized helper
+  try {
+    await createNotification({
+      notificationId: "pomodoro-start",
+      type: "basic",
+      title: "Pomodoro Iniciado",
+      message: `Foco por ${pomodoroConfig.focusMinutes} minutos. Mantenha o foco!`,
+    });
+  } catch (error) {
+    console.error("[v0] Failed to create pomodoro-start notification:", error);
+    // Don't rethrow - Pomodoro flow should continue even if notification fails
   }
+
   console.log("[v0] Pomodoro started:", newState);
 }
 
@@ -343,16 +330,18 @@ async function handlePomodoroAlarm() {
     await notifyStateUpdate();
     
     // Notifica que foco terminou
-    const notifyEnabled = await getNotificationSetting();
-    if (notifyEnabled) {
-      await chrome.notifications.create("pomodoro-focus-complete", {
+    try {
+      await createNotification({
+        notificationId: "pomodoro-focus-complete",
         type: "basic",
-        iconUrl: "icons/icon48.png",
         title: "Foco Completo! 🎯",
         message: `Parabéns! Você completou ${config.focusMinutes} minutos de foco. Pronto para o descanso?`,
         buttons: [{ title: "Iniciar Descanso" }],
-        requireInteraction: true // Força usuário a interagir
+        requireInteraction: true, // Força usuário a interagir
       });
+    } catch (error) {
+      console.error("[v0] Failed to create pomodoro-focus-complete notification:", error);
+      // Don't rethrow - state transition must continue even if notification fails
     }
     
     console.log("[v0] Pomodoro: Focus → Focus Complete (awaiting user)");
@@ -364,23 +353,19 @@ async function handlePomodoroAlarm() {
     await chrome.alarms.clear("pomodoro-keepalive");
     await notifyStateUpdate();
 
-    const notifyEnabled = await getNotificationSetting();
-    
-    console.log('[v0] Cycle complete notification settings:', { notifyEnabled });
-
-    if (notifyEnabled) {
-      try {
-        await chrome.notifications.create("pomodoro-cycle-complete", {
-          type: "basic",
-          iconUrl: "icons/icon48.png",
-          title: "Ciclo Completo!",
-          message: "Pronto para outra sessão de foco?",
-        });
-        console.log('[v0] Cycle complete notification created successfully');
-      } catch (error) {
-        console.error('[v0] Failed to create cycle complete notification:', error);
-      }
+    // Create cycle complete notification
+    try {
+      await createNotification({
+        notificationId: "pomodoro-cycle-complete",
+        type: "basic",
+        title: "Ciclo Completo!",
+        message: "Pronto para outra sessão de foco?",
+      });
+    } catch (error) {
+      console.error("[v0] Failed to create pomodoro-cycle-complete notification:", error);
+      // Don't rethrow - state transition must continue even if notification fails
     }
+
     console.log("[v0] Pomodoro: Break → Idle");
   }
 }

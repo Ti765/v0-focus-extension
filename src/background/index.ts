@@ -84,16 +84,19 @@ async function bootstrap() {
  */
 async function requestNotificationPermission() {
   try {
-    // Verifica se já temos permissão
-    const hasPermission = chrome.notifications !== undefined;
+    // Import notification helper
+    const { verifyNotificationPermission, createNotification } = await import("./modules/notification-helper");
+    
+    // Verifica se temos permissão
+    const hasPermission = await verifyNotificationPermission();
     
     if (hasPermission) {
       console.log('[v0] Notification permission granted');
       
-      // Envia notificação de boas-vindas
-      await chrome.notifications.create('welcome-notification', {
+      // Envia notificação de boas-vindas usando centralized helper
+      await createNotification({
+        notificationId: 'welcome-notification',
         type: 'basic',
-        iconUrl: 'icons/icon48.png',
         title: 'Focus Extension Ativada!',
         message: 'As notificações estão funcionando. Você receberá alertas sobre Pomodoro e sites distrativos.',
         priority: 1
@@ -101,7 +104,7 @@ async function requestNotificationPermission() {
       
       console.log('[v0] Welcome notification sent');
     } else {
-      console.warn('[v0] Notifications API not available');
+      console.warn('[v0] Notifications API not available or permission not granted');
     }
   } catch (error) {
     console.error('[v0] Failed to request notification permission:', error);

@@ -94,14 +94,25 @@ export default function SettingsView() {
     setSettings(next);
   }
 
-  const testNotification = () => {
+  const testNotification = async () => {
     if (isChromeExtension && typeof chrome !== "undefined" && chrome.notifications) {
-      chrome.notifications.create({
-        type: "basic",
-        iconUrl: "icons/icon48.png",
-        title: "Teste de Notificação",
-        message: "As notificações estão funcionando corretamente!",
-      });
+      try {
+        // Options page can't directly import background modules, so use chrome.runtime.getURL for icon
+        const notificationId = `test-notification-${Date.now()}`;
+        await chrome.notifications.create(notificationId, {
+          type: "basic",
+          iconUrl: chrome.runtime.getURL("icon48.png"),
+          title: "Teste de Notificação",
+          message: "As notificações estão funcionando corretamente!",
+        });
+        console.log("[SettingsView] Test notification created:", notificationId);
+      } catch (error: any) {
+        console.error("[SettingsView] Failed to create test notification:", {
+          error: error?.message || String(error),
+          stack: error?.stack,
+        });
+        alert(`Erro ao criar notificação: ${error?.message || String(error)}`);
+      }
     } else {
       alert("Teste de Notificação: As notificações estão funcionando corretamente!");
     }

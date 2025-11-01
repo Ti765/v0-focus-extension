@@ -76,14 +76,9 @@ export async function notifyStateUpdate() {
 
 /** Leitura de settings para gate de notificações (usado por outros módulos) */
 export async function notificationsAllowed(): Promise<boolean> {
-  try {
-    const { [STORAGE_KEYS.SETTINGS]: settings } =
-      await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
-    // default: true (para não suprimir alertas caso falhe leitura)
-    return settings?.notifications ?? settings?.notificationsEnabled !== false;
-  } catch {
-    return true;
-  }
+  // Use centralized notification helper for consistent logic
+  const { getNotificationSetting } = await import("./notification-helper");
+  return await getNotificationSetting();
 }
 
 /** Agrega todo o estado atual da extensão */
