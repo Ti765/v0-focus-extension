@@ -1,3 +1,6 @@
+// Initialize Sentry monitoring FIRST - before any other imports
+import "../lib/sentry-background";
+
 // Logs de inicialização bem no topo (aparecem mesmo se algo falhar depois)
 console.log("[v0] Service Worker starting up...");
 console.log("[v0] DEBUG: Extension version:", chrome.runtime.getManifest().version);
@@ -315,6 +318,17 @@ async function initializeExtension(details: chrome.runtime.InstalledDetails) {
   
   console.log(`\nRules matching ${testUrl}:`, matching);
   return { dynamic, session, matching };
+};
+
+// Expose Sentry test functions
+(globalThis as any).testSentryBackground = async () => {
+  const { testSentryBackground, testSentryComprehensive } = await import("../lib/sentry-test");
+  testSentryBackground();
+};
+
+(globalThis as any).testSentryComprehensive = async () => {
+  const { testSentryComprehensive } = await import("../lib/sentry-test");
+  testSentryComprehensive("background");
 };
 
 /** onStartup: re-inicializa módulos (navegador aberto) */

@@ -6,6 +6,11 @@ import { readFileSync, existsSync } from 'fs';
 
 // Build somente da UI (popup/options). Não mexe no SW nem no content script.
 export default defineConfig({
+  define: {
+    // Replace all process.env.NODE_ENV references with a string literal during build
+    // The process object itself is polyfilled at runtime via process-polyfill.ts
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
+  },
   plugins: [
     react(),
     // Plugin para copiar arquivos estáticos

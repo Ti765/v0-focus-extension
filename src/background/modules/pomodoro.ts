@@ -3,18 +3,35 @@ import type { PomodoroState, PomodoroConfig } from "../../shared/types";
 import { enablePomodoroBlocking, disablePomodoroBlocking } from "./blocker";
 import { notifyStateUpdate } from "./message-handler";
 import { createNotification } from "./notification-helper";
+import { Sentry } from "../../lib/sentry-background";
 
 export async function initializePomodoro() {
-  console.log("[v0] Initializing Pomodoro module");
-  
-  // Check for active timer and recover if needed
-  await recoverActiveTimer();
-  
-  chrome.alarms.onAlarm.addListener(async (alarm) => {
-    if (alarm.name === ALARM_NAMES.POMODORO) {
-      await handlePomodoroAlarm();
+  return Sentry.startSpan(
+    { op: "module.init", name: "Initialize Pomodoro" },
+    async (span) => {
+      try {
+        console.log("[v0] Initializing Pomodoro module");
+        Sentry.logger.info("Pomodoro module initializing");
+        
+        // Check for active timer and recover if needed
+        await recoverActiveTimer();
+        
+        chrome.alarms.onAlarm.addListener(async (alarm) => {
+          if (alarm.name === ALARM_NAMES.POMODORO) {
+            await handlePomodoroAlarm();
+          }
+        });
+        
+        Sentry.logger.info("Pomodoro module initialized successfully");
+        span.setAttribute("success", true);
+      } catch (error) {
+        Sentry.logger.error("Failed to initialize Pomodoro module", { error });
+        span.setAttribute("success", false);
+        Sentry.captureException(error);
+        throw error;
+      }
     }
-  });
+  );
 }
 
 async function recoverActiveTimer() {

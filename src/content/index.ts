@@ -1,3 +1,6 @@
+// Initialize Sentry monitoring FIRST
+import "../lib/sentry-content";
+
 import type { Message, ContentAnalysisResult, MessageId } from "../shared/types";
 import { MAX_TEXT_LENGTH, STORAGE_KEYS } from "../shared/constants";
 import { MESSAGE } from "../shared/types";

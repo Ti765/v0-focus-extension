@@ -4,6 +4,7 @@ import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain } from "../../shared/url";
 import { createDomainUrlFilter } from "../../shared/regex-utils";
 import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
+import { Sentry } from "../../lib/sentry-background";
 
 const POMODORO_RULE_ID_START = 1000;
 const USER_BLACKLIST_RULE_ID_START = 2000;
@@ -33,10 +34,27 @@ function generateRuleIdForDomain(domain: string): number {
 // ---- API pública ----
 
 export async function initializeBlocker() {
-  console.log("[v0] Initializing blocker module");
-  // Initialize debug configuration cache
-  await updateDebugConfigCache();
-  await syncUserBlacklistRules();
+  return Sentry.startSpan(
+    { op: "module.init", name: "Initialize Blocker" },
+    async (span) => {
+      try {
+        console.log("[v0] Initializing blocker module");
+        Sentry.logger.info("Blocker module initializing");
+        
+        // Initialize debug configuration cache
+        await updateDebugConfigCache();
+        await syncUserBlacklistRules();
+        
+        Sentry.logger.info("Blocker module initialized successfully");
+        span.setAttribute("success", true);
+      } catch (error) {
+        Sentry.logger.error("Failed to initialize blocker module", { error });
+        span.setAttribute("success", false);
+        Sentry.captureException(error);
+        throw error;
+      }
+    }
+  );
 }
 
 /**
@@ -44,33 +62,46 @@ export async function initializeBlocker() {
  * Used for cleanup on extension install/update.
  */
 export async function cleanupAllDNRRules(): Promise<void> {
-  console.log("[v0] Cleaning up all DNR rules...");
-  
-  try {
-    // Clean dynamic rules
-    const dynamicRules = await chrome.declarativeNetRequest.getDynamicRules();
-    if (dynamicRules.length > 0) {
-      const dynamicIds = dynamicRules.map(r => r.id);
-      await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: dynamicIds
-      });
-      console.log(`[v0] Removed ${dynamicIds.length} dynamic rules:`, dynamicIds);
+  return Sentry.startSpan(
+    { op: "dnr.cleanup", name: "Cleanup All DNR Rules" },
+    async (span) => {
+      console.log("[v0] Cleaning up all DNR rules...");
+      
+      try {
+        // Clean dynamic rules
+        const dynamicRules = await chrome.declarativeNetRequest.getDynamicRules();
+        if (dynamicRules.length > 0) {
+          const dynamicIds = dynamicRules.map(r => r.id);
+          await chrome.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: dynamicIds
+          });
+          console.log(`[v0] Removed ${dynamicIds.length} dynamic rules:`, dynamicIds);
+          span.setAttribute("dynamic_rules_removed", dynamicIds.length);
+          Sentry.logger.info(`Removed ${dynamicIds.length} dynamic DNR rules`);
+        }
+        
+        // Clean session rules
+        const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
+        if (sessionRules.length > 0) {
+          const sessionIds = sessionRules.map(r => r.id);
+          await chrome.declarativeNetRequest.updateSessionRules({
+            removeRuleIds: sessionIds
+          });
+          console.log(`[v0] Removed ${sessionIds.length} session rules:`, sessionIds);
+          span.setAttribute("session_rules_removed", sessionIds.length);
+          Sentry.logger.info(`Removed ${sessionIds.length} session DNR rules`);
+        }
+        
+        console.log("[v0] DNR cleanup complete");
+        span.setAttribute("success", true);
+      } catch (error) {
+        console.error("[v0] Error during DNR cleanup:", error);
+        span.setAttribute("success", false);
+        Sentry.logger.error("DNR cleanup failed", { error });
+        Sentry.captureException(error);
+      }
     }
-    
-    // Clean session rules
-    const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
-    if (sessionRules.length > 0) {
-      const sessionIds = sessionRules.map(r => r.id);
-      await chrome.declarativeNetRequest.updateSessionRules({
-        removeRuleIds: sessionIds
-      });
-      console.log(`[v0] Removed ${sessionIds.length} session rules:`, sessionIds);
-    }
-    
-    console.log("[v0] DNR cleanup complete");
-  } catch (error) {
-    console.error("[v0] Error during DNR cleanup:", error);
-  }
+  );
 }
 
 /**
@@ -117,42 +148,75 @@ export async function debugDNRStatus(): Promise<void> {
 }
 
 export async function addToBlacklist(domain: string) {
-  const storageData = (await chrome.storage.local.get(
-    STORAGE_KEYS.BLACKLIST
-  )) as { [key: string]: BlacklistEntry[] };
+  return Sentry.startSpan(
+    { op: "blocker.add", name: "Add to Blacklist" },
+    async (span) => {
+      try {
+        span.setAttribute("domain", domain);
+        
+        const storageData = (await chrome.storage.local.get(
+          STORAGE_KEYS.BLACKLIST
+        )) as { [key: string]: BlacklistEntry[] };
 
-  const blacklist = storageData[STORAGE_KEYS.BLACKLIST] ?? [];
-  const normalized = normalizeDomain(domain);
-  if (!normalized) return;
+        const blacklist = storageData[STORAGE_KEYS.BLACKLIST] ?? [];
+        const normalized = normalizeDomain(domain);
+        if (!normalized) {
+          Sentry.logger.warn("Invalid domain for blacklist", { domain });
+          span.setAttribute("success", false);
+          span.setAttribute("reason", "invalid_domain");
+          return;
+        }
 
-  if (blacklist.some((e) => e.domain === normalized)) {
-    console.log("[v0] Domain already in blacklist:", normalized);
-    return;
-  }
+        span.setAttribute("normalized_domain", normalized);
 
-  const brandDomain = (d: string) => d as Domain;
-  const updated: BlacklistEntry[] = [
-    ...blacklist,
-    { domain: brandDomain(normalized), addedAt: new Date().toISOString() },
-  ];
+        if (blacklist.some((e) => e.domain === normalized)) {
+          console.log("[v0] Domain already in blacklist:", normalized);
+          span.setAttribute("success", false);
+          span.setAttribute("reason", "already_exists");
+          return;
+        }
 
-  // If nothing changed (defensive), avoid writing and broadcasting
-  try {
-    const prev = blacklist;
-    // shallow/structural check: length and domains
-    const same = prev.length === updated.length && prev.every((v, i) => v.domain === updated[i].domain && v.addedAt === updated[i].addedAt);
-    if (same) {
-      console.log("[v0] addToBlacklist: no-op, blacklist identical");
-      return;
+        const brandDomain = (d: string) => d as Domain;
+        const updated: BlacklistEntry[] = [
+          ...blacklist,
+          { domain: brandDomain(normalized), addedAt: new Date().toISOString() },
+        ];
+
+        // If nothing changed (defensive), avoid writing and broadcasting
+        try {
+          const prev = blacklist;
+          // shallow/structural check: length and domains
+          const same = prev.length === updated.length && prev.every((v, i) => v.domain === updated[i].domain && v.addedAt === updated[i].addedAt);
+          if (same) {
+            console.log("[v0] addToBlacklist: no-op, blacklist identical");
+            span.setAttribute("success", false);
+            span.setAttribute("reason", "no_change");
+            return;
+          }
+        } catch (e) {
+          // ignore and proceed to write
+        }
+
+        await chrome.storage.local.set({ [STORAGE_KEYS.BLACKLIST]: updated });
+        await syncUserBlacklistRules();
+        await notifyStateUpdate();
+        
+        console.log("[v0] Added to blacklist:", normalized);
+        Sentry.logger.info("Domain added to blacklist", { 
+          domain: normalized,
+          blacklist_size: updated.length 
+        });
+        
+        span.setAttribute("success", true);
+        span.setAttribute("blacklist_size", updated.length);
+      } catch (error) {
+        Sentry.logger.error("Failed to add domain to blacklist", { domain, error });
+        span.setAttribute("success", false);
+        Sentry.captureException(error);
+        throw error;
+      }
     }
-  } catch (e) {
-    // ignore and proceed to write
-  }
-
-  await chrome.storage.local.set({ [STORAGE_KEYS.BLACKLIST]: updated });
-  await syncUserBlacklistRules();
-  await notifyStateUpdate();
-  console.log("[v0] Added to blacklist:", normalized);
+  );
 }
 
 export async function removeFromBlacklist(domain: string) {
