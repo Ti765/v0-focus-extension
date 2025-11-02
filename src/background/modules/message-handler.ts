@@ -179,15 +179,22 @@ export async function handleMessage(
       name: `Handle Message: ${message.type}` 
     },
     async (span) => {
+      // Helper to safely set span attributes
+      const setSpanAttribute = (key: string, value: unknown) => {
+        if (span && typeof span.setAttribute === 'function') {
+          span.setAttribute(key, value);
+        }
+      };
+
       try {
         console.log("[v0] DEBUG: Message handler - type:", message.type);
         console.log("[v0] DEBUG: Message handler - payload:", message.payload);
         console.log("[v0] DEBUG: Message handler - sender:", _sender);
 
-        span.setAttribute("message_type", message.type);
-        span.setAttribute("has_payload", !!message.payload);
-        span.setAttribute("sender_id", _sender.id || "unknown");
-        span.setAttribute("sender_url", _sender.url || "unknown");
+        setSpanAttribute("message_type", message.type);
+        setSpanAttribute("has_payload", !!message.payload);
+        setSpanAttribute("sender_id", _sender.id || "unknown");
+        setSpanAttribute("sender_url", _sender.url || "unknown");
 
         let result: any;
 
@@ -201,7 +208,7 @@ export async function handleMessage(
             const domain = (message.payload as any)?.domain;
             if (typeof domain === "string") {
               await addToBlacklist(domain);
-              span.setAttribute("domain", domain);
+              setSpanAttribute("domain", domain);
             }
             await notifyStateUpdate();
             result = { success: true };
@@ -366,14 +373,14 @@ export async function handleMessage(
         }
 
 
-        span.setAttribute("success", true);
+        setSpanAttribute("success", true);
         return result;
       } catch (error) {
         Sentry.logger.error("Message handling failed", { 
           type: message.type,
           error 
         });
-        span.setAttribute("success", false);
+        setSpanAttribute("success", false);
         Sentry.captureException(error);
         throw error;
       }

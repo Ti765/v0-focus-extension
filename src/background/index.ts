@@ -320,16 +320,36 @@ async function initializeExtension(details: chrome.runtime.InstalledDetails) {
   return { dynamic, session, matching };
 };
 
-// Expose Sentry test functions
-(globalThis as any).testSentryBackground = async () => {
-  const { testSentryBackground, testSentryComprehensive } = await import("../lib/sentry-test");
-  testSentryBackground();
-};
+// Expose Sentry test functions (dev / explicit flag only)
+const shouldExposeSentryTests = (() => {
+  // Primary check: Vite's import.meta.env (injected at build-time)
+  try {
+    // @ts-ignore - import.meta.env is injected by Vite at build time
+    const env = import.meta.env;
+    if (env) {
+      const mode = env.MODE;
+      const nodeEnv = env.NODE_ENV;
+      if (mode === 'development' || nodeEnv === 'development') return true;
+      // Check for explicit test flag
+      if (env.VITE_SENTRY_TEST_EXPOSE === 'true' || env.SENTRY_TEST_EXPOSE === 'true') return true;
+    }
+  } catch {
+    // import.meta.env may not be available, continue to fallback checks
+  }
+  return false;
+})();
 
-(globalThis as any).testSentryComprehensive = async () => {
-  const { testSentryComprehensive } = await import("../lib/sentry-test");
-  testSentryComprehensive("background");
-};
+if (shouldExposeSentryTests) {
+  (globalThis as any).testSentryBackground = async () => {
+    const { testSentryBackground } = await import("../lib/sentry-test");
+    await testSentryBackground();
+  };
+
+  (globalThis as any).testSentryComprehensive = async () => {
+    const { testSentryComprehensive } = await import("../lib/sentry-test");
+    await testSentryComprehensive("background");
+  };
+}
 
 /** onStartup: re-inicializa módulos (navegador aberto) */
 function handleStartup() {

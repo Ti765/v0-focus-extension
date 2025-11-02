@@ -37,6 +37,13 @@ export async function initializeBlocker() {
   return Sentry.startSpan(
     { op: "module.init", name: "Initialize Blocker" },
     async (span) => {
+      // Helper to safely set span attributes
+      const setSpanAttribute = (key: string, value: unknown) => {
+        if (span && typeof span.setAttribute === 'function') {
+          span.setAttribute(key, value);
+        }
+      };
+
       try {
         console.log("[v0] Initializing blocker module");
         Sentry.logger.info("Blocker module initializing");
@@ -46,10 +53,10 @@ export async function initializeBlocker() {
         await syncUserBlacklistRules();
         
         Sentry.logger.info("Blocker module initialized successfully");
-        span.setAttribute("success", true);
+        setSpanAttribute("success", true);
       } catch (error) {
         Sentry.logger.error("Failed to initialize blocker module", { error });
-        span.setAttribute("success", false);
+        setSpanAttribute("success", false);
         Sentry.captureException(error);
         throw error;
       }
@@ -65,6 +72,13 @@ export async function cleanupAllDNRRules(): Promise<void> {
   return Sentry.startSpan(
     { op: "dnr.cleanup", name: "Cleanup All DNR Rules" },
     async (span) => {
+      // Helper to safely set span attributes
+      const setSpanAttribute = (key: string, value: unknown) => {
+        if (span && typeof span.setAttribute === 'function') {
+          span.setAttribute(key, value);
+        }
+      };
+
       console.log("[v0] Cleaning up all DNR rules...");
       
       try {
@@ -76,7 +90,7 @@ export async function cleanupAllDNRRules(): Promise<void> {
             removeRuleIds: dynamicIds
           });
           console.log(`[v0] Removed ${dynamicIds.length} dynamic rules:`, dynamicIds);
-          span.setAttribute("dynamic_rules_removed", dynamicIds.length);
+          setSpanAttribute("dynamic_rules_removed", dynamicIds.length);
           Sentry.logger.info(`Removed ${dynamicIds.length} dynamic DNR rules`);
         }
         
@@ -88,15 +102,15 @@ export async function cleanupAllDNRRules(): Promise<void> {
             removeRuleIds: sessionIds
           });
           console.log(`[v0] Removed ${sessionIds.length} session rules:`, sessionIds);
-          span.setAttribute("session_rules_removed", sessionIds.length);
+          setSpanAttribute("session_rules_removed", sessionIds.length);
           Sentry.logger.info(`Removed ${sessionIds.length} session DNR rules`);
         }
         
         console.log("[v0] DNR cleanup complete");
-        span.setAttribute("success", true);
+        setSpanAttribute("success", true);
       } catch (error) {
         console.error("[v0] Error during DNR cleanup:", error);
-        span.setAttribute("success", false);
+        setSpanAttribute("success", false);
         Sentry.logger.error("DNR cleanup failed", { error });
         Sentry.captureException(error);
       }
@@ -151,8 +165,15 @@ export async function addToBlacklist(domain: string) {
   return Sentry.startSpan(
     { op: "blocker.add", name: "Add to Blacklist" },
     async (span) => {
+      // Helper to safely set span attributes
+      const setSpanAttribute = (key: string, value: unknown) => {
+        if (span && typeof span.setAttribute === 'function') {
+          span.setAttribute(key, value);
+        }
+      };
+
       try {
-        span.setAttribute("domain", domain);
+        setSpanAttribute("domain", domain);
         
         const storageData = (await chrome.storage.local.get(
           STORAGE_KEYS.BLACKLIST
@@ -162,17 +183,17 @@ export async function addToBlacklist(domain: string) {
         const normalized = normalizeDomain(domain);
         if (!normalized) {
           Sentry.logger.warn("Invalid domain for blacklist", { domain });
-          span.setAttribute("success", false);
-          span.setAttribute("reason", "invalid_domain");
+          setSpanAttribute("success", false);
+          setSpanAttribute("reason", "invalid_domain");
           return;
         }
 
-        span.setAttribute("normalized_domain", normalized);
+        setSpanAttribute("normalized_domain", normalized);
 
         if (blacklist.some((e) => e.domain === normalized)) {
           console.log("[v0] Domain already in blacklist:", normalized);
-          span.setAttribute("success", false);
-          span.setAttribute("reason", "already_exists");
+          setSpanAttribute("success", false);
+          setSpanAttribute("reason", "already_exists");
           return;
         }
 
@@ -189,8 +210,8 @@ export async function addToBlacklist(domain: string) {
           const same = prev.length === updated.length && prev.every((v, i) => v.domain === updated[i].domain && v.addedAt === updated[i].addedAt);
           if (same) {
             console.log("[v0] addToBlacklist: no-op, blacklist identical");
-            span.setAttribute("success", false);
-            span.setAttribute("reason", "no_change");
+            setSpanAttribute("success", false);
+            setSpanAttribute("reason", "no_change");
             return;
           }
         } catch (e) {
@@ -207,11 +228,11 @@ export async function addToBlacklist(domain: string) {
           blacklist_size: updated.length 
         });
         
-        span.setAttribute("success", true);
-        span.setAttribute("blacklist_size", updated.length);
+        setSpanAttribute("success", true);
+        setSpanAttribute("blacklist_size", updated.length);
       } catch (error) {
         Sentry.logger.error("Failed to add domain to blacklist", { domain, error });
-        span.setAttribute("success", false);
+        setSpanAttribute("success", false);
         Sentry.captureException(error);
         throw error;
       }

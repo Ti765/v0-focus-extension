@@ -32,8 +32,10 @@ import {
 import { 
   SENTRY_DSN_BROWSER, 
   getBackgroundSentryOptions,
-  filterGlobalStateIntegrations 
+  filterGlobalStateIntegrations,
+  getEnvironment 
 } from "./sentry-config";
+import { createNoOpSpan } from "./sentry-utils";
 
 // Flag to prevent multiple initializations
 let isInitialized = false;
@@ -95,19 +97,26 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     scope = isolatedScope;
     isInitialized = true;
 
-    console.log('[v0][Sentry] Background service worker monitoring initialized with isolated client');
-    console.log('[v0][Sentry] Environment:', options.environment);
-    console.log('[v0][Sentry] Release:', options.release);
-    console.log('[v0][Sentry] DSN:', SENTRY_DSN_BROWSER);
-    console.log('[v0][Sentry] sendDefaultPii:', options.sendDefaultPii);
-    console.log('[v0][Sentry] Client initialized:', !!sentryClient);
+    const env = getEnvironment();
+    const isDev = env === 'development';
+
+    if (isDev) {
+      console.log('[v0][Sentry] Background service worker monitoring initialized with isolated client');
+      console.log('[v0][Sentry] Environment:', options.environment);
+      console.log('[v0][Sentry] Release:', options.release);
+      console.log('[v0][Sentry] DSN:', SENTRY_DSN_BROWSER);
+      console.log('[v0][Sentry] sendDefaultPii:', options.sendDefaultPii);
+      console.log('[v0][Sentry] Client initialized:', !!sentryClient);
+    }
     
-    // Test connection by capturing a test message
-    try {
-      isolatedScope.captureMessage('[v0][Sentry] Background worker connected successfully', { level: 'info' });
-      console.log('[v0][Sentry] Test message sent to verify connection');
-    } catch (testError) {
-      console.warn('[v0][Sentry] Test message failed:', testError);
+    // Test connection by capturing a test message (dev only)
+    if (isDev) {
+      try {
+        isolatedScope.captureMessage('[v0][Sentry] Background worker connected successfully', 'info');
+        console.log('[v0][Sentry] Test message sent to verify connection');
+      } catch (testError) {
+        console.warn('[v0][Sentry] Test message failed:', testError);
+      }
     }
     
     return { client: sentryClient, scope: isolatedScope };
@@ -161,12 +170,12 @@ export const Sentry = {
   // Start span using isolated scope
   startSpan: <T,>(options: Parameters<typeof sentryStartSpan>[0], callback: Parameters<typeof sentryStartSpan>[1]): T => {
     if (!backgroundScope || !backgroundClient) {
-      // If Sentry not available, just execute callback
-      return callback({} as any);
+      // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
+      return callback(createNoOpSpan() as any) as T;
     }
     // Pass scope explicitly in options for manual clients
     // This ensures startSpan uses our isolated scope instead of trying to access global Sentry context
-    return sentryStartSpan({ ...options, scope: backgroundScope }, callback);
+    return sentryStartSpan({ ...options, scope: backgroundScope }, callback) as T;
   },
   
   // Get client (for advanced usage)

@@ -35,6 +35,7 @@ import {
   filterGlobalStateIntegrations,
   getEnvironment 
 } from "./sentry-config";
+import { createNoOpSpan } from "./sentry-utils";
 
 // CRITICAL: Use page-level flag to prevent multiple initializations
 // Content scripts can be injected multiple times into the same page
@@ -45,6 +46,33 @@ const SENTRY_INIT_FLAG = '__V0_SENTRY_CONTENT_INITIALIZED';
 let isInitialized = false;
 let client: BrowserClient | null = null;
 let scope: Scope | null = null;
+let initPromise: Promise<{ client: BrowserClient | null; scope: Scope }> | null = null;
+
+/**
+ * Retry loop to wait for initialization to complete
+ * Returns the same promise for concurrent callers
+ */
+async function waitForInitialization(
+  maxAttempts: number = 3,
+  backoffMs: number = 50
+): Promise<{ client: BrowserClient | null; scope: Scope }> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (isInitialized && client && scope) {
+      return { client, scope };
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+  }
+  
+  // If still not ready after retries, log warning and return fallback
+  const env = getEnvironment();
+  if (env === 'development') {
+    console.warn('[v0][Sentry] Content script Sentry initialization still not ready after retries');
+  }
+  const dummyScope = new Scope();
+  return { client: null, scope: dummyScope };
+}
 
 /**
  * Initialize Sentry client for content script context
@@ -58,7 +86,25 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     if (isInitialized && client && scope) {
       return { client, scope };
     }
-    // If not ready yet, return null to prevent duplicate initialization
+    // If not ready yet, use retry loop with initPromise
+    // Multiple concurrent callers will wait on the same promise
+    if (!initPromise) {
+      initPromise = waitForInitialization();
+      // Update module state when promise resolves
+      initPromise.then((result) => {
+        if (result.client && result.scope) {
+          client = result.client;
+          scope = result.scope;
+          isInitialized = true;
+        }
+        initPromise = null;
+      }).catch(() => {
+        initPromise = null;
+      });
+    }
+    // For synchronous return at module load, we need immediate value
+    // So we return dummy scope and let async resolution update state
+    // This means first access might miss, but subsequent will work
     const dummyScope = new Scope();
     return { client: null, scope: dummyScope };
   }
@@ -66,6 +112,33 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
   // Atomically set flag BEFORE any initialization work to prevent race conditions
   (globalThis as any)[SENTRY_INIT_FLAG] = true;
 
+  // Create initPromise immediately so concurrent callers can await it
+  initPromise = performInitialization().then(
+    (result) => {
+      client = result.client;
+      scope = result.scope;
+      isInitialized = true;
+      initPromise = null; // Clear when done
+      return result;
+    },
+    (error) => {
+      // Reset flag on failure so retry is possible
+      (globalThis as any)[SENTRY_INIT_FLAG] = false;
+      isInitialized = false;
+      client = null;
+      scope = null;
+      initPromise = null; // Clear on error
+      throw error;
+    }
+  );
+
+  // Return dummy immediately for synchronous callers
+  // Real values will be available once promise resolves
+  const dummyScope = new Scope();
+  return { client: null, scope: dummyScope };
+}
+
+async function performInitialization(): Promise<{ client: BrowserClient | null; scope: Scope }> {
   try {
     // Get configuration options
     const options = getContentSentryOptions();
@@ -103,10 +176,6 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     // Initialize client (must be done after setting scope)
     sentryClient.init();
 
-    client = sentryClient;
-    scope = isolatedScope;
-    isInitialized = true;
-
     // Log successful initialization (only in dev)
     const env = getEnvironment();
     if (env === 'development') {
@@ -115,12 +184,6 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     
     return { client: sentryClient, scope: isolatedScope };
   } catch (error) {
-    // Reset flag on failure so retry is possible
-    (globalThis as any)[SENTRY_INIT_FLAG] = false;
-    isInitialized = false;
-    client = null;
-    scope = null;
-    
     // Log error silently - content scripts should not pollute page console
     // Only log in development to aid debugging
     const env = getEnvironment();
@@ -173,12 +236,12 @@ export const Sentry = {
   // Start span using isolated scope
   startSpan: <T,>(options: Parameters<typeof sentryStartSpan>[0], callback: Parameters<typeof sentryStartSpan>[1]): T => {
     if (!contentScope || !contentClient) {
-      // If Sentry not available, just execute callback
-      return callback({} as any);
+      // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
+      return callback(createNoOpSpan() as any) as T;
     }
     // Pass scope explicitly in options for manual clients
     // This ensures startSpan uses our isolated scope instead of trying to access global Sentry context
-    return sentryStartSpan({ ...options, scope: contentScope }, callback);
+    return sentryStartSpan({ ...options, scope: contentScope }, callback) as T;
   },
   
   // Get client (for advanced usage)

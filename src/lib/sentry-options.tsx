@@ -26,14 +26,14 @@ import {
   browserTracingIntegration,
   consoleLoggingIntegration,
 } from "@sentry/browser";
-import {
-  ErrorBoundary as SentryErrorBoundary,
-} from "@sentry/react";
+// Note: We don't import SentryErrorBoundary from @sentry/react
+// Instead, we implement a custom ErrorBoundary that uses our isolated scope
 import { 
   SENTRY_DSN_REACT, 
   getOptionsSentryOptions,
   filterGlobalStateIntegrations 
 } from "./sentry-config";
+import { createNoOpSpan } from "./sentry-utils";
 
 // Flag to prevent multiple initializations
 let isInitialized = false;
@@ -54,11 +54,7 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     const options = getOptionsSentryOptions();
     
     // Get default integrations and filter out those that use global state
-    const defaultIntegrations = getDefaultIntegrations({
-      browserTracingIntegrationOptions: {
-        // Configure browser tracing if needed
-      },
-    });
+    const defaultIntegrations = getDefaultIntegrations({});
     
     // Filter out integrations that use global state
     const safeIntegrations = filterGlobalStateIntegrations(defaultIntegrations);
@@ -125,19 +121,58 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
 const { client: optionsClient, scope: optionsScope } = initializeSentry();
 
 /**
- * ErrorBoundary component wrapper that uses the isolated client
+ * ErrorBoundary component that uses the isolated Sentry client/scope
+ * This custom implementation ensures React errors are captured even when using manual client setup
  */
-export const ErrorBoundary = (props: React.ComponentProps<typeof SentryErrorBoundary>) => {
-  if (!optionsClient) {
-    // If client failed to initialize, just render children without ErrorBoundary
-    return <>{props.children}</>;
+export class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback?: React.ReactNode },
+  { hasError: boolean; retryKey: number }
+> {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, retryKey: 0 };
   }
-  
-  // Use the isolated scope for ErrorBoundary
-  return (
-    <SentryErrorBoundary {...props} />
-  );
-};
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Capture error using our isolated scope
+    // Fallback handling is done via state.hasError and render method
+    if (optionsClient && optionsScope) {
+      optionsScope.setContext('react', {
+        componentStack: errorInfo.componentStack,
+      });
+      optionsScope.captureException(error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // Use custom fallback if provided, otherwise use default from props
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+      // Default fallback with retry that forces remount via key change
+      return (
+        <div style={{ padding: '20px', textAlign: 'center' }}>
+          <h2>Something went wrong</h2>
+          <button onClick={() => this.setState({ hasError: false, retryKey: this.state.retryKey + 1 })}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+
+    // Force remount on retry by using key prop
+    return (
+      <React.Fragment key={this.state.retryKey}>
+        {this.props.children}
+      </React.Fragment>
+    );
+  }
+}
 
 /**
  * Sentry object with methods that use the isolated scope
@@ -178,12 +213,12 @@ export const Sentry = {
   // Start span using isolated scope
   startSpan: <T,>(options: Parameters<typeof sentryStartSpan>[0], callback: Parameters<typeof sentryStartSpan>[1]): T => {
     if (!optionsScope || !optionsClient) {
-      // If Sentry not available, just execute callback
-      return callback({} as any);
+      // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
+      return callback(createNoOpSpan() as any) as T;
     }
     // Pass scope explicitly in options for manual clients
     // This ensures startSpan uses our isolated scope instead of trying to access global Sentry context
-    return sentryStartSpan({ ...options, scope: optionsScope }, callback);
+    return sentryStartSpan({ ...options, scope: optionsScope }, callback) as T;
   },
   
   // Get client (for advanced usage)

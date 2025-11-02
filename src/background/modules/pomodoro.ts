@@ -9,6 +9,13 @@ export async function initializePomodoro() {
   return Sentry.startSpan(
     { op: "module.init", name: "Initialize Pomodoro" },
     async (span) => {
+      // Helper to safely set span attributes
+      const setSpanAttribute = (key: string, value: unknown) => {
+        if (span && typeof span.setAttribute === 'function') {
+          span.setAttribute(key, value);
+        }
+      };
+
       try {
         console.log("[v0] Initializing Pomodoro module");
         Sentry.logger.info("Pomodoro module initializing");
@@ -23,10 +30,10 @@ export async function initializePomodoro() {
         });
         
         Sentry.logger.info("Pomodoro module initialized successfully");
-        span.setAttribute("success", true);
+        setSpanAttribute("success", true);
       } catch (error) {
         Sentry.logger.error("Failed to initialize Pomodoro module", { error });
-        span.setAttribute("success", false);
+        setSpanAttribute("success", false);
         Sentry.captureException(error);
         throw error;
       }

@@ -17,11 +17,23 @@
 // Note: Sentry is imported dynamically in each function to use
 // the correct isolated client from each context
 
+// Module-scoped timeout IDs to prevent memory leaks from uncancellable timeouts
+let backgroundTestTimeout: ReturnType<typeof setTimeout> | null = null;
+let popupTestTimeout: ReturnType<typeof setTimeout> | null = null;
+let optionsTestTimeout: ReturnType<typeof setTimeout> | null = null;
+let contentTestTimeout: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Test error tracking in background service worker
  * Opens DevTools > Console and call: testSentryBackground()
  */
 export async function testSentryBackground() {
+  // Clear any pending timeout from previous calls
+  if (backgroundTestTimeout !== null) {
+    clearTimeout(backgroundTestTimeout);
+    backgroundTestTimeout = null;
+  }
+
   // Import Sentry from background context
   const { Sentry } = await import("./sentry-background");
   
@@ -46,17 +58,18 @@ export async function testSentryBackground() {
     );
     
     // Test error capture
-    setTimeout(() => {
+    backgroundTestTimeout = setTimeout(() => {
       try {
         throw new Error("Sentry Test Error - Background Context");
       } catch (error) {
-        Sentry.captureException(error);
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
         console.log("[Sentry Test] Error captured");
       }
+      backgroundTestTimeout = null; // Clear tracking when callback runs
     }, 100);
     
   } catch (error) {
-    Sentry.captureException(error);
+    Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
     console.log("[Sentry Test] Error captured");
   }
   
@@ -69,6 +82,12 @@ export async function testSentryBackground() {
  * Call this from a test button in popup
  */
 export async function testSentryPopup() {
+  // Clear any pending timeout from previous calls
+  if (popupTestTimeout !== null) {
+    clearTimeout(popupTestTimeout);
+    popupTestTimeout = null;
+  }
+
   // Import Sentry from popup context
   const { Sentry } = await import("./sentry-popup");
   
@@ -88,13 +107,14 @@ export async function testSentryPopup() {
       });
       
       // Test error
-      setTimeout(() => {
+      popupTestTimeout = setTimeout(() => {
         try {
           throw new Error("Sentry Test Error - Popup Context");
         } catch (error) {
-          Sentry.captureException(error);
+          Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
           console.log("[Sentry Test] Error captured from popup");
         }
+        popupTestTimeout = null; // Clear tracking when callback runs
       }, 100);
     }
   );
@@ -107,6 +127,12 @@ export async function testSentryPopup() {
  * Call this from a test button in options
  */
 export async function testSentryOptions() {
+  // Clear any pending timeout from previous calls
+  if (optionsTestTimeout !== null) {
+    clearTimeout(optionsTestTimeout);
+    optionsTestTimeout = null;
+  }
+
   // Import Sentry from options context
   const { Sentry } = await import("./sentry-options");
   
@@ -126,13 +152,14 @@ export async function testSentryOptions() {
       });
       
       // Test error
-      setTimeout(() => {
+      optionsTestTimeout = setTimeout(() => {
         try {
           throw new Error("Sentry Test Error - Options Context");
         } catch (error) {
-          Sentry.captureException(error);
+          Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
           console.log("[Sentry Test] Error captured from options");
         }
+        optionsTestTimeout = null; // Clear tracking when callback runs
       }, 100);
     }
   );
@@ -145,6 +172,12 @@ export async function testSentryOptions() {
  * Open browser console on any page and call: testSentryContent()
  */
 export async function testSentryContent() {
+  // Clear any pending timeout from previous calls
+  if (contentTestTimeout !== null) {
+    clearTimeout(contentTestTimeout);
+    contentTestTimeout = null;
+  }
+
   // Import Sentry from content context
   const { Sentry } = await import("./sentry-content");
   
@@ -158,13 +191,14 @@ export async function testSentryContent() {
       span.setAttribute("test", true);
       
       // Test error
-      setTimeout(() => {
+      contentTestTimeout = setTimeout(() => {
         try {
           throw new Error("Sentry Test Error - Content Script Context");
         } catch (error) {
-          Sentry.captureException(error);
+          Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
           console.log("[Sentry Test] Error captured from content script");
         }
+        contentTestTimeout = null; // Clear tracking when callback runs
       }, 100);
     }
   );
@@ -198,7 +232,7 @@ export async function testSentryComprehensive(context: "background" | "popup" | 
   
   Sentry.startSpan(
     { op: "test.comprehensive", name: "Comprehensive Sentry Test" },
-    async (span) => {
+    async (span: any) => {
       span.setAttribute("context", context);
       span.setAttribute("test_type", "comprehensive");
       
@@ -214,7 +248,7 @@ export async function testSentryComprehensive(context: "background" | "popup" | 
       // 4. Test span with attributes
       await Sentry.startSpan(
         { op: "test.nested", name: "Nested Test Span" },
-        async (nestedSpan) => {
+        async (nestedSpan: any) => {
           nestedSpan.setAttribute("nested", true);
           nestedSpan.setAttribute("parent", "comprehensive_test");
           

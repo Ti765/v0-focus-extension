@@ -41,7 +41,7 @@ export const SENTRY_DSN = SENTRY_DSN_REACT;
 export const getEnvironment = (): string => {
   try {
     // Direct access to Vite-injected environment variables
-    // @ts-ignore - import.meta.env is injected by Vite at build time
+    // @ts-expect-error - import.meta.env is injected by Vite at build time
     const env = import.meta.env;
     if (env) {
       const mode = env.MODE;
