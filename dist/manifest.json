@@ -78,6 +78,6 @@
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://o4510270313660416.ingest.us.sentry.io https://us.sentry.io"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io https://*"
   }
 }

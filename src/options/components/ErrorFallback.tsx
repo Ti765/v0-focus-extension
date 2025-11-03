@@ -5,12 +5,15 @@
  * Provides user-friendly error message and recovery options
  */
 
+import { getEnvironment } from "../../lib/sentry-config";
+
 interface ErrorFallbackProps {
   error?: Error;
   resetError?: () => void;
 }
 
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
+  const isDevelopment = getEnvironment() === 'development';
   return (
     <div style={{
       display: 'flex',
@@ -70,7 +73,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
               border: '1px solid #e5e5e5',
             }}>
               {error.message}
-              {error.stack && `\n\n${error.stack}`}
+              {isDevelopment && error.stack && `\n\n${error.stack}`}
             </pre>
           </details>
         )}

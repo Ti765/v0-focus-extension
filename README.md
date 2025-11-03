@@ -47,8 +47,16 @@ npm install
 3. **Configure o Sentry** (monitoramento de erros):
 
 Crie um arquivo `.env` na raiz do projeto:
+
+**Opção 1: Usar o arquivo de exemplo (recomendado)**
 ```bash
-# Windows PowerShell
+cd v0-focus-extension
+cp .env.example .env
+# Depois edite .env e substitua os valores pelos seus DSNs reais
+```
+
+**Opção 2: Windows PowerShell**
+```bash
 cd v0-focus-extension
 @"
 VITE_SENTRY_DSN_REACT=your-react-dsn-here
@@ -56,6 +64,17 @@ VITE_SENTRY_DSN_BROWSER=your-browser-dsn-here
 VITE_SENTRY_SEND_DEFAULT_PII=false
 VITE_SENTRY_ENABLE_BROWSER_TRACING=false
 "@ | Out-File -FilePath .env -Encoding UTF8
+```
+
+**Opção 3: Unix/Linux/macOS (Bash)**
+```bash
+cd v0-focus-extension
+cat > .env << 'EOF'
+VITE_SENTRY_DSN_REACT=your-react-dsn-here
+VITE_SENTRY_DSN_BROWSER=your-browser-dsn-here
+VITE_SENTRY_SEND_DEFAULT_PII=false
+VITE_SENTRY_ENABLE_BROWSER_TRACING=false
+EOF
 ```
 
 ⚠️ **IMPORTANTE**: 

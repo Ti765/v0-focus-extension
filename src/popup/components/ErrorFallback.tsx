@@ -7,7 +7,6 @@
 
 interface ErrorFallbackProps {
   error?: Error;
-  componentStack?: string;
   resetError?: () => void;
 }
 

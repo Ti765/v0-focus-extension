@@ -28,6 +28,8 @@ let contentTestTimeout: ReturnType<typeof setTimeout> | null = null;
  * Opens DevTools > Console and call: testSentryBackground()
  */
 export async function testSentryBackground() {
+  let sentryRef: typeof import("./sentry-background")["Sentry"] | null = null;
+  
   // Clear any pending timeout from previous calls
   if (backgroundTestTimeout !== null) {
     clearTimeout(backgroundTestTimeout);
@@ -35,7 +37,9 @@ export async function testSentryBackground() {
   }
 
   // Import Sentry from background context
-  const { Sentry } = await import("./sentry-background");
+  const module = await import("./sentry-background");
+  const { Sentry } = module;
+  sentryRef = Sentry;
   
   console.log("[Sentry Test] Testing background error tracking...");
   
@@ -69,7 +73,11 @@ export async function testSentryBackground() {
     }, 100);
     
   } catch (error) {
-    Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
+    if (sentryRef) {
+      sentryRef.captureException(error instanceof Error ? error : new Error(String(error)));
+    } else {
+      console.error("[Sentry Test] Background test failed before Sentry loaded", error);
+    }
     console.log("[Sentry Test] Error captured");
   }
   

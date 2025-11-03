@@ -81,7 +81,7 @@ async function waitForInitialization(
  */
 function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
   // Validate configuration before attempting initialization
-  if (!validateSentryConfig()) {
+  if (!validateSentryConfig('browser')) {
     const dummyScope = new Scope();
     return { client: null, scope: dummyScope };
   }

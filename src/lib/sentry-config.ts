@@ -85,19 +85,52 @@ export const getRelease = (): string => {
  * Validate Sentry configuration
  * Checks that required DSNs are configured
  * 
+ * @param mode - Which DSN(s) to validate: 'react', 'browser', or 'any' (default: 'any')
  * @returns true if configuration is valid, false otherwise
  */
-export const validateSentryConfig = (): boolean => {
+export const validateSentryConfig = (mode: 'react' | 'browser' | 'any' = 'any'): boolean => {
   const hasReactDSN = !!SENTRY_DSN_REACT;
   const hasBrowserDSN = !!SENTRY_DSN_BROWSER;
   
-  if (!hasReactDSN || !hasBrowserDSN) {
+  let isValid = false;
+  let missingDSNs: string[] = [];
+  
+  if (mode === 'react') {
+    isValid = hasReactDSN;
+    if (!hasReactDSN) {
+      missingDSNs = ['VITE_SENTRY_DSN_REACT'];
+    }
+  } else if (mode === 'browser') {
+    isValid = hasBrowserDSN;
+    if (!hasBrowserDSN) {
+      missingDSNs = ['VITE_SENTRY_DSN_BROWSER'];
+    }
+  } else {
+    // 'any' mode: require at least one DSN
+    isValid = hasReactDSN || hasBrowserDSN;
+    if (!hasReactDSN && !hasBrowserDSN) {
+      missingDSNs = ['VITE_SENTRY_DSN_REACT', 'VITE_SENTRY_DSN_BROWSER'];
+    } else if (!hasReactDSN) {
+      missingDSNs = ['VITE_SENTRY_DSN_REACT'];
+    } else if (!hasBrowserDSN) {
+      missingDSNs = ['VITE_SENTRY_DSN_BROWSER'];
+    }
+  }
+  
+  if (!isValid) {
     const env = getEnvironment();
     if (env === 'development') {
-      console.warn('[Sentry] Missing DSN configuration. Set VITE_SENTRY_DSN_REACT and VITE_SENTRY_DSN_BROWSER in .env file.');
+      const dsnList = missingDSNs.join(' and ');
+      const modeText = mode === 'any' 
+        ? 'at least one DSN' 
+        : mode === 'react' 
+          ? 'React DSN' 
+          : 'Browser DSN';
+      console.warn(`[Sentry] Missing ${modeText} configuration. Set ${dsnList} in .env file.`);
     }
     return false;
   }
+  
   return true;
 };
 
