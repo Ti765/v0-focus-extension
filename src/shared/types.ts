@@ -90,6 +90,7 @@ export interface YouTubeCustomization {
   hideShorts: boolean;
   hideComments: boolean;
   hideRecommendations: boolean;
+  selectorsToRemove?: string[];
 }
 export type SiteCustomization = YouTubeCustomization;
 export type SiteCustomizationMap = Record<string, SiteCustomization>;
@@ -107,6 +108,10 @@ export interface UserSettings {
   timezone?: string;
   telemetry?: boolean;
   debugDNR?: boolean; // Debug flag for DNR (Declarative Net Request) operations
+  debugTracking?: boolean;
+  debugContentAnalysis?: boolean;
+  debugPomodoro?: boolean;
+  debugZenMode?: boolean;
   // Backward compatibility - UI currently references these in places
   analyticsConsent?: boolean;
   notificationsEnabled?: boolean;

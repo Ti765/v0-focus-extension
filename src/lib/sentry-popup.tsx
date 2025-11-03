@@ -31,7 +31,8 @@ import {
 import { 
   SENTRY_DSN_REACT, 
   getPopupSentryOptions,
-  filterGlobalStateIntegrations 
+  filterGlobalStateIntegrations,
+  validateSentryConfig 
 } from "./sentry-config";
 import { createNoOpSpan } from "./sentry-utils";
 
@@ -49,6 +50,12 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     return { client, scope };
   }
 
+  // Validate configuration before attempting initialization
+  if (!validateSentryConfig()) {
+    const dummyScope = new Scope();
+    return { client: null, scope: dummyScope };
+  }
+
   try {
     // Get configuration options
     const options = getPopupSentryOptions();
@@ -59,15 +66,25 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     // Filter out integrations that use global state
     const safeIntegrations = filterGlobalStateIntegrations(defaultIntegrations);
     
-    // Add browser tracing integration
-    // Note: browserTracingIntegration may use some global state, but it's needed for performance monitoring
-    // We add it after filtering and let Sentry handle it appropriately
-    try {
-      const browserTracing = browserTracingIntegration();
-      safeIntegrations.push(browserTracing);
-    } catch (e) {
-      // browserTracingIntegration not available or error, skip it
-      console.warn('[v0][Sentry] Browser tracing integration not available:', e);
+    // Add browser tracing integration (opt-in, disabled by default for extension isolation)
+    // browserTracingIntegration uses global state and may break extension isolation
+    // Enable via environment variable: VITE_SENTRY_ENABLE_BROWSER_TRACING=true
+    const enableBrowserTracing = import.meta.env.VITE_SENTRY_ENABLE_BROWSER_TRACING === 'true';
+    
+    if (enableBrowserTracing) {
+      try {
+        const browserTracing = browserTracingIntegration();
+        safeIntegrations.push(browserTracing);
+      } catch (e) {
+        // browserTracingIntegration not available or error, skip it
+        console.warn('[v0][Sentry] Browser tracing integration not available:', e);
+      }
+    } else {
+      // Tracing disabled for popup contexts to maintain extension isolation
+      // @ts-expect-error - import.meta.env is injected by Vite at build time
+      if (import.meta.env?.MODE === 'development') {
+        console.log('[v0][Sentry] Browser tracing disabled for popup (isolation mode). Set VITE_SENTRY_ENABLE_BROWSER_TRACING=true to enable.');
+      }
     }
     
     // Add console logging integration

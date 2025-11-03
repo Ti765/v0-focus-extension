@@ -31,7 +31,8 @@ import {
 import { 
   SENTRY_DSN_REACT, 
   getOptionsSentryOptions,
-  filterGlobalStateIntegrations 
+  filterGlobalStateIntegrations,
+  validateSentryConfig 
 } from "./sentry-config";
 import { createNoOpSpan } from "./sentry-utils";
 
@@ -47,6 +48,12 @@ let scope: Scope | null = null;
 function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
   if (isInitialized && client && scope) {
     return { client, scope };
+  }
+
+  // Validate configuration before attempting initialization
+  if (!validateSentryConfig()) {
+    const dummyScope = new Scope();
+    return { client: null, scope: dummyScope };
   }
 
   try {

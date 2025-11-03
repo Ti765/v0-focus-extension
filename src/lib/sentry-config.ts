@@ -13,17 +13,20 @@
 // separately in each context file (React vs Browser)
 
 /**
- * Sentry DSNs from project configuration
+ * Sentry DSNs from environment variables
  * 
  * IMPORTANT: React and Browser SDKs require separate DSNs in Sentry.
  * - SENTRY_DSN_REACT: For @sentry/react (popup and options pages)
  * - SENTRY_DSN_BROWSER: For @sentry/browser (background and content scripts)
  * 
+ * These values are read from environment variables at build time.
+ * See .env.example for configuration instructions.
+ * 
  * @see sentry_configuration.md
  * @see sentry_browser.md
  */
-export const SENTRY_DSN_REACT = "https://58e161b5578429493e2034e4dadd3f58@o4510270313660416.ingest.us.sentry.io/4510293785640960";
-export const SENTRY_DSN_BROWSER = "https://817f965a1b1055130ff59d97bef82e5f@o4510270313660416.ingest.us.sentry.io/4510294325198848";
+export const SENTRY_DSN_REACT = import.meta.env.VITE_SENTRY_DSN_REACT || "";
+export const SENTRY_DSN_BROWSER = import.meta.env.VITE_SENTRY_DSN_BROWSER || "";
 
 // Keep SENTRY_DSN for backward compatibility (defaults to React DSN)
 export const SENTRY_DSN = SENTRY_DSN_REACT;
@@ -76,6 +79,26 @@ export const getRelease = (): string => {
     console.warn('[Sentry] Could not read manifest version:', error);
   }
   return '1.0.0';
+};
+
+/**
+ * Validate Sentry configuration
+ * Checks that required DSNs are configured
+ * 
+ * @returns true if configuration is valid, false otherwise
+ */
+export const validateSentryConfig = (): boolean => {
+  const hasReactDSN = !!SENTRY_DSN_REACT;
+  const hasBrowserDSN = !!SENTRY_DSN_BROWSER;
+  
+  if (!hasReactDSN || !hasBrowserDSN) {
+    const env = getEnvironment();
+    if (env === 'development') {
+      console.warn('[Sentry] Missing DSN configuration. Set VITE_SENTRY_DSN_REACT and VITE_SENTRY_DSN_BROWSER in .env file.');
+    }
+    return false;
+  }
+  return true;
 };
 
 /**
@@ -168,13 +191,17 @@ export function filterGlobalStateIntegrations<T extends { name?: string } | (() 
 /**
  * Background service worker specific options
  * 
- * IMPORTANT: sendDefaultPii is set to true for background worker
- * as it's a safe context (no user page content) and helps with debugging
+ * IMPORTANT: sendDefaultPii is configurable via environment variable
+ * Defaults to false for privacy compliance (GDPR/CCPA)
+ * Set VITE_SENTRY_SEND_DEFAULT_PII=true only if you have user consent and compliance approval
  */
 export const getBackgroundSentryOptions = (): Omit<CommonSentryOptions, 'dsn'> => {
+  // Read from env with safe default (false)
+  const sendPii = import.meta.env.VITE_SENTRY_SEND_DEFAULT_PII === 'true';
+  
   return {
     ...getCommonSentryOptions(),
-    sendDefaultPii: true, // Enable PII collection for background worker (safe context)
+    sendDefaultPii: sendPii, // Configurable via environment variable
     initialScope: {
       tags: {
         context: 'background',

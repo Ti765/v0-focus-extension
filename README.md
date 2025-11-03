@@ -44,12 +44,31 @@ Extensão Chrome Manifest V3 para produtividade e gerenciamento de foco, constru
 npm install
 ```
 
-3. Execute o build de desenvolvimento:
+3. **Configure o Sentry** (monitoramento de erros):
+
+Crie um arquivo `.env` na raiz do projeto:
+```bash
+# Windows PowerShell
+cd v0-focus-extension
+@"
+VITE_SENTRY_DSN_REACT=your-react-dsn-here
+VITE_SENTRY_DSN_BROWSER=your-browser-dsn-here
+VITE_SENTRY_SEND_DEFAULT_PII=false
+VITE_SENTRY_ENABLE_BROWSER_TRACING=false
+"@ | Out-File -FilePath .env -Encoding UTF8
+```
+
+⚠️ **IMPORTANTE**: 
+- Substitua `your-react-dsn-here` e `your-browser-dsn-here` pelos seus DSNs reais do Sentry
+- Os DSNs são sensíveis e nunca devem ser commitados no repositório
+- O arquivo `.env` está no `.gitignore` e não será versionado
+
+4. Execute o build de desenvolvimento:
 ```bash
 npm run dev
 ```
 
-4. Carregue a extensão no Chrome:
+5. Carregue a extensão no Chrome:
    - Abra `chrome://extensions/`
    - Ative o "Modo do desenvolvedor"
    - Clique em "Carregar sem compactação"

@@ -33,7 +33,8 @@ import {
   SENTRY_DSN_BROWSER, 
   getBackgroundSentryOptions,
   filterGlobalStateIntegrations,
-  getEnvironment 
+  getEnvironment,
+  validateSentryConfig 
 } from "./sentry-config";
 import { createNoOpSpan } from "./sentry-utils";
 
@@ -42,6 +43,9 @@ let isInitialized = false;
 let client: BrowserClient | null = null;
 let scope: Scope | null = null;
 
+// Flag to prevent test message spam on worker restarts
+let testMessageSent = false;
+
 /**
  * Initialize Sentry client for background service worker context
  * This creates an isolated client that doesn't pollute global state
@@ -49,6 +53,12 @@ let scope: Scope | null = null;
 function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
   if (isInitialized && client && scope) {
     return { client, scope };
+  }
+
+  // Validate configuration before attempting initialization
+  if (!validateSentryConfig()) {
+    const dummyScope = new Scope();
+    return { client: null, scope: dummyScope };
   }
 
   try {
@@ -109,11 +119,40 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
       console.log('[v0][Sentry] Client initialized:', !!sentryClient);
     }
     
-    // Test connection by capturing a test message (dev only)
-    if (isDev) {
+    // Test connection by capturing a test message (dev only, once per session)
+    // Use chrome.storage.session to persist across worker restarts within the same browser session
+    if (isDev && !testMessageSent) {
       try {
-        isolatedScope.captureMessage('[v0][Sentry] Background worker connected successfully', 'info');
-        console.log('[v0][Sentry] Test message sent to verify connection');
+        // Check session storage asynchronously, but don't block initialization
+        (async () => {
+          try {
+            let alreadySent = false;
+            if (typeof chrome !== 'undefined' && chrome.storage?.session) {
+              const result = await chrome.storage.session.get('sentry_test_message_sent');
+              alreadySent = result.sentry_test_message_sent === true;
+            }
+            
+            if (!alreadySent) {
+              isolatedScope.captureMessage('[v0][Sentry] Background worker connected successfully', 'info');
+              console.log('[v0][Sentry] Test message sent to verify connection');
+              testMessageSent = true;
+              
+              // Mark as sent in session storage
+              if (typeof chrome !== 'undefined' && chrome.storage?.session) {
+                chrome.storage.session.set({ sentry_test_message_sent: true }).catch(() => {
+                  // Ignore errors setting session storage
+                });
+              }
+            }
+          } catch (e) {
+            // If session check fails, use module flag as fallback
+            if (!testMessageSent) {
+              isolatedScope.captureMessage('[v0][Sentry] Background worker connected successfully', 'info');
+              console.log('[v0][Sentry] Test message sent to verify connection');
+              testMessageSent = true;
+            }
+          }
+        })();
       } catch (testError) {
         console.warn('[v0][Sentry] Test message failed:', testError);
       }

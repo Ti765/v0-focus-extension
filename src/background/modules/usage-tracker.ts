@@ -1,6 +1,6 @@
 import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/constants";
 import type { TimeLimitEntry } from "../../shared/types";
-import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
+import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain, extractDomain } from "../../shared/url";
 import { createDomainUrlFilter } from "../../shared/regex-utils";
 import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
@@ -267,7 +267,10 @@ async function recordActiveTabUsage() {
   dailyUsage[today].perDomain[domain] = (dailyUsage[today].perDomain[domain] || 0) + timeSpent;
   
   // Update total minutes for the day
-  dailyUsage[today].totalMinutes = Object.values(dailyUsage[today].perDomain).reduce((sum: number, time: number) => sum + time, 0) / 60;
+  dailyUsage[today].totalMinutes = Object.values(dailyUsage[today].perDomain).reduce((sum: number, time: unknown) => {
+    const timeValue = typeof time === 'number' ? time : 0;
+    return sum + timeValue;
+  }, 0) / 60;
 
   await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
 

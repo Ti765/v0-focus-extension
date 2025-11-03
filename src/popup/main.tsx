@@ -9,7 +9,7 @@ import "./index.css"
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Sentry.ErrorBoundary fallback={ErrorFallback} showDialog={false}>
+    <Sentry.ErrorBoundary fallback={(props) => <ErrorFallback {...props} />} showDialog={false}>
       <App />
     </Sentry.ErrorBoundary>
   </React.StrictMode>,

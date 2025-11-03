@@ -12,7 +12,11 @@ export async function initializePomodoro() {
       // Helper to safely set span attributes
       const setSpanAttribute = (key: string, value: unknown) => {
         if (span && typeof span.setAttribute === 'function') {
-          span.setAttribute(key, value);
+          // Convert unknown to SpanAttributeValue (string | number | boolean)
+          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
+            ? value 
+            : String(value);
+          span.setAttribute(key, safeValue);
         }
       };
 
@@ -34,7 +38,7 @@ export async function initializePomodoro() {
       } catch (error) {
         Sentry.logger.error("Failed to initialize Pomodoro module", { error });
         setSpanAttribute("success", false);
-        Sentry.captureException(error);
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
         throw error;
       }
     }

@@ -40,7 +40,11 @@ export async function initializeBlocker() {
       // Helper to safely set span attributes
       const setSpanAttribute = (key: string, value: unknown) => {
         if (span && typeof span.setAttribute === 'function') {
-          span.setAttribute(key, value);
+          // Convert unknown to SpanAttributeValue (string | number | boolean)
+          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
+            ? value 
+            : String(value);
+          span.setAttribute(key, safeValue);
         }
       };
 
@@ -57,7 +61,7 @@ export async function initializeBlocker() {
       } catch (error) {
         Sentry.logger.error("Failed to initialize blocker module", { error });
         setSpanAttribute("success", false);
-        Sentry.captureException(error);
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
         throw error;
       }
     }
@@ -75,7 +79,11 @@ export async function cleanupAllDNRRules(): Promise<void> {
       // Helper to safely set span attributes
       const setSpanAttribute = (key: string, value: unknown) => {
         if (span && typeof span.setAttribute === 'function') {
-          span.setAttribute(key, value);
+          // Convert unknown to SpanAttributeValue (string | number | boolean)
+          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
+            ? value 
+            : String(value);
+          span.setAttribute(key, safeValue);
         }
       };
 
@@ -112,7 +120,7 @@ export async function cleanupAllDNRRules(): Promise<void> {
         console.error("[v0] Error during DNR cleanup:", error);
         setSpanAttribute("success", false);
         Sentry.logger.error("DNR cleanup failed", { error });
-        Sentry.captureException(error);
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
       }
     }
   );
@@ -168,7 +176,11 @@ export async function addToBlacklist(domain: string) {
       // Helper to safely set span attributes
       const setSpanAttribute = (key: string, value: unknown) => {
         if (span && typeof span.setAttribute === 'function') {
-          span.setAttribute(key, value);
+          // Convert unknown to SpanAttributeValue (string | number | boolean)
+          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
+            ? value 
+            : String(value);
+          span.setAttribute(key, safeValue);
         }
       };
 
@@ -233,7 +245,7 @@ export async function addToBlacklist(domain: string) {
       } catch (error) {
         Sentry.logger.error("Failed to add domain to blacklist", { domain, error });
         setSpanAttribute("success", false);
-        Sentry.captureException(error);
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
         throw error;
       }
     }
@@ -368,9 +380,9 @@ async function syncUserBlacklistRules() {
             action: {
               type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
               responseHeaders: [
-                { header: 'cache-control', operation: 'set', value: 'no-store, no-cache, must-revalidate' },
-                { header: 'pragma', operation: 'set', value: 'no-cache' },
-                { header: 'expires', operation: 'set', value: '0' },
+                { header: 'cache-control', operation: 'set' as chrome.declarativeNetRequest.HeaderOperation, value: 'no-store, no-cache, must-revalidate' },
+                { header: 'pragma', operation: 'set' as chrome.declarativeNetRequest.HeaderOperation, value: 'no-cache' },
+                { header: 'expires', operation: 'set' as chrome.declarativeNetRequest.HeaderOperation, value: '0' },
               ],
             },
             condition: {

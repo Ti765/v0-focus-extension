@@ -33,7 +33,8 @@ import {
   SENTRY_DSN_BROWSER, 
   getContentSentryOptions,
   filterGlobalStateIntegrations,
-  getEnvironment 
+  getEnvironment,
+  validateSentryConfig 
 } from "./sentry-config";
 import { createNoOpSpan } from "./sentry-utils";
 
@@ -79,6 +80,12 @@ async function waitForInitialization(
  * This creates an isolated client that doesn't pollute global state
  */
 function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
+  // Validate configuration before attempting initialization
+  if (!validateSentryConfig()) {
+    const dummyScope = new Scope();
+    return { client: null, scope: dummyScope };
+  }
+
   // Atomic check-and-set: if flag is already true, return early immediately
   if ((globalThis as any)[SENTRY_INIT_FLAG] === true) {
     // Another script is initializing or already initialized
@@ -197,8 +204,20 @@ async function performInitialization(): Promise<{ client: BrowserClient | null; 
   }
 }
 
-// Initialize on module load
-const { client: contentClient, scope: contentScope } = initializeSentry();
+// Initialize on module load (for side effects only)
+initializeSentry();
+
+/**
+ * Helper functions that access current client/scope values
+ * These read from the mutable module-level variables, not frozen constants
+ */
+function getCurrentClient(): BrowserClient | null {
+  return client;
+}
+
+function getCurrentScope(): Scope | null {
+  return scope;
+}
 
 /**
  * Sentry object with methods that use the isolated scope
@@ -207,50 +226,61 @@ const { client: contentClient, scope: contentScope } = initializeSentry();
 export const Sentry = {
   // Capture exception using isolated scope
   captureException: (error: Error, hint?: any) => {
-    if (!contentScope || !contentClient) return;
-    return contentScope.captureException(error, hint);
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) return;
+    return currentScope.captureException(error, hint);
   },
   
   // Capture message using isolated scope
   captureMessage: (message: string, level?: any) => {
-    if (!contentScope || !contentClient) return;
-    return contentScope.captureMessage(message, level);
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) return;
+    return currentScope.captureMessage(message, level);
   },
   
   // Logger methods using isolated scope
   logger: {
     info: (message: string, data?: any) => {
-      if (!contentScope || !contentClient) return;
-      return sentryLogger.info(message, data, { scope: contentScope });
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      return sentryLogger.info(message, data, { scope: currentScope });
     },
     warn: (message: string, data?: any) => {
-      if (!contentScope || !contentClient) return;
-      return sentryLogger.warn(message, data, { scope: contentScope });
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      return sentryLogger.warn(message, data, { scope: currentScope });
     },
     error: (message: string, data?: any) => {
-      if (!contentScope || !contentClient) return;
-      return sentryLogger.error(message, data, { scope: contentScope });
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      return sentryLogger.error(message, data, { scope: currentScope });
     },
   },
   
   // Start span using isolated scope
   startSpan: <T,>(options: Parameters<typeof sentryStartSpan>[0], callback: Parameters<typeof sentryStartSpan>[1]): T => {
-    if (!contentScope || !contentClient) {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) {
       // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
       return callback(createNoOpSpan() as any) as T;
     }
     // Pass scope explicitly in options for manual clients
-    // This ensures startSpan uses our isolated scope instead of trying to access global Sentry context
-    return sentryStartSpan({ ...options, scope: contentScope }, callback) as T;
+    return sentryStartSpan({ ...options, scope: currentScope }, callback) as T;
   },
   
   // Get client (for advanced usage)
-  getClient: () => contentClient,
+  getClient: () => getCurrentClient(),
   
   // Get scope (for advanced usage)
-  getScope: () => contentScope,
+  getScope: () => getCurrentScope(),
 };
 
-// Export scope for advanced usage
-export { contentScope as scope };
+// Export scope getter for advanced usage
+export const getContentScope = () => scope;
 

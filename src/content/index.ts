@@ -113,11 +113,11 @@ const analyzePageContent = async () => {
     const url = location.href;
       const result = await analyzeText(text, url);
       const id: MessageId = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`) as any;
-      await chrome.runtime.sendMessage({ type: MESSAGE.CONTENT_ANALYSIS_RESULT, id, source: "content-script", ts: Date.now(), payload: { result } } as unknown as Message, (response) => {
+      await chrome.runtime.sendMessage({ type: MESSAGE.CONTENT_ANALYSIS_RESULT, id, source: "content-script", ts: Date.now(), payload: { result } } as unknown as Message, () => {
         // Handle response or ignore errors
         const err = chrome.runtime.lastError;
-        if (err && !err.message.includes("Receiving end does not exist") && !err.message.includes("message channel closed")) {
-          console.warn("[v0][CS] Content analysis message error:", err.message);
+        if (err && !err.message?.includes("Receiving end does not exist") && !err.message?.includes("message channel closed")) {
+          console.warn("[v0][CS] Content analysis message error:", err.message ?? 'Unknown error');
         }
       });
   } catch (e) {
@@ -152,7 +152,6 @@ async function analyzeText(text: string, url: string): Promise<ContentAnalysisRe
   const distractingKeywords: string[] = settings?.distractingKeywords || [];
 
   const lowerText = text.toLowerCase();
-  const lowerUrl = url.toLowerCase();
   
   // Also analyze page title and meta description
   const title = document.title.toLowerCase();
@@ -458,8 +457,7 @@ function applyZenMode(preset?: string) {
             SANITIZE_DOM: true,
             KEEP_CONTENT: true,
             RETURN_DOM: false,
-            RETURN_DOM_FRAGMENT: false,
-            RETURN_DOM_IMPORT: false
+            RETURN_DOM_FRAGMENT: false
           });
           
           // Set the sanitized HTML

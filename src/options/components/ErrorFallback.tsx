@@ -5,11 +5,8 @@
  * Provides user-friendly error message and recovery options
  */
 
-import React from "react";
-
 interface ErrorFallbackProps {
   error?: Error;
-  componentStack?: string;
   resetError?: () => void;
 }
 
