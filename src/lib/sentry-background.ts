@@ -1,0 +1,260 @@
+/**
+ * Sentry Initialization for Background Service Worker
+ * 
+ * This file initializes Sentry for the background service worker context using manual client setup
+ * to avoid global state pollution in browser extensions.
+ * 
+ * Service workers have special considerations:
+ * - Can be terminated and restarted at any time
+ * - No DOM access, so no browser tracing integration
+ * - Must be lightweight and fast to initialize
+ * 
+ * IMPORTANT: We use BrowserClient (not ReactClient) with isolated Scope to follow browser extension
+ * best practices. This prevents interference with websites that also use Sentry.
+ * 
+ * @see https://docs.sentry.io/platforms/javascript/best-practices/shared-environments/
+ */
+
+// IMPORTANT: Import process polyfill FIRST, before Sentry
+// This prevents "process is not defined" errors from libraries
+import "./process-polyfill";
+
+import {
+  BrowserClient,
+  defaultStackParser,
+  getDefaultIntegrations,
+  makeFetchTransport,
+  Scope,
+  startSpan as sentryStartSpan,
+  consoleLoggingIntegration,
+} from "@sentry/browser";
+import { 
+  SENTRY_DSN_BROWSER, 
+  getBackgroundSentryOptions,
+  filterGlobalStateIntegrations,
+  getEnvironment,
+  validateSentryConfig 
+} from "./sentry-config";
+import {
+  captureWithIsolatedScope,
+  createNoOpSpan,
+  logWithIsolatedScope,
+  withIsolatedScope,
+} from "./sentry-utils";
+
+// Flag to prevent multiple initializations
+let isInitialized = false;
+let client: BrowserClient | null = null;
+let scope: Scope | null = null;
+
+// Flag to prevent test message spam on worker restarts
+let testMessageSent = false;
+
+/**
+ * Initialize Sentry client for background service worker context
+ * This creates an isolated client that doesn't pollute global state
+ */
+function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
+  if (isInitialized && client && scope) {
+    return { client, scope };
+  }
+
+  // Validate configuration before attempting initialization
+  if (!validateSentryConfig('browser')) {
+    const dummyScope = new Scope();
+    return { client: null, scope: dummyScope };
+  }
+
+  try {
+    // Get configuration options
+    const options = getBackgroundSentryOptions();
+    
+    // Get default integrations and filter out those that use global state
+    const defaultIntegrations = getDefaultIntegrations({});
+    
+    // Filter out integrations that use global state
+    const safeIntegrations = filterGlobalStateIntegrations(defaultIntegrations);
+    
+    // Add console logging integration for automatic log capture
+    // consoleLoggingIntegration should be safe as it only listens to console methods
+    try {
+      const consoleLogging = consoleLoggingIntegration({ levels: ['warn', 'error'] });
+      safeIntegrations.push(consoleLogging);
+    } catch (e) {
+      console.warn('[v0][Sentry] Console logging integration not available:', e);
+    }
+
+    // Create client manually (NOT using Sentry.init())
+    const sentryClient = new BrowserClient({
+      ...options,
+      dsn: SENTRY_DSN_BROWSER,
+      transport: makeFetchTransport,
+      stackParser: defaultStackParser,
+      integrations: safeIntegrations,
+    });
+
+    // Create isolated scope
+    const isolatedScope = new Scope();
+    isolatedScope.setClient(sentryClient);
+    
+    // Set initial scope tags if provided
+    if (options.initialScope?.tags) {
+      Object.entries(options.initialScope.tags).forEach(([key, value]) => {
+        isolatedScope.setTag(key, value);
+      });
+    }
+
+    // Initialize client (must be done after setting scope)
+    sentryClient.init();
+
+    client = sentryClient;
+    scope = isolatedScope;
+    isInitialized = true;
+
+    const env = getEnvironment();
+    const isDev = env === 'development';
+
+    if (isDev) {
+      console.log('[v0][Sentry] Background service worker monitoring initialized with isolated client');
+      console.log('[v0][Sentry] Environment:', options.environment);
+      console.log('[v0][Sentry] Release:', options.release);
+      console.log('[v0][Sentry] DSN:', SENTRY_DSN_BROWSER);
+      console.log('[v0][Sentry] sendDefaultPii:', options.sendDefaultPii);
+      console.log('[v0][Sentry] Client initialized:', !!sentryClient);
+    }
+    
+    // Test connection by capturing a test message (dev only, once per session)
+    // Use chrome.storage.session to persist across worker restarts within the same browser session
+    if (isDev && !testMessageSent) {
+      try {
+        // Check session storage asynchronously, but don't block initialization
+        (async () => {
+          try {
+            let alreadySent = false;
+            if (typeof chrome !== 'undefined' && chrome.storage?.session) {
+              const result = await chrome.storage.session.get('sentry_test_message_sent');
+              alreadySent = result.sentry_test_message_sent === true;
+            }
+            
+            if (!alreadySent) {
+              isolatedScope.captureMessage('[v0][Sentry] Background worker connected successfully', 'info');
+              console.log('[v0][Sentry] Test message sent to verify connection');
+              testMessageSent = true;
+              
+              // Mark as sent in session storage
+              if (typeof chrome !== 'undefined' && chrome.storage?.session) {
+                chrome.storage.session.set({ sentry_test_message_sent: true }).catch(() => {
+                  // Ignore errors setting session storage
+                });
+              }
+            }
+          } catch (e) {
+            // If session check fails, use module flag as fallback
+            if (!testMessageSent) {
+              isolatedScope.captureMessage('[v0][Sentry] Background worker connected successfully', 'info');
+              console.log('[v0][Sentry] Test message sent to verify connection');
+              testMessageSent = true;
+            }
+          }
+        })();
+      } catch (testError) {
+        console.warn('[v0][Sentry] Test message failed:', testError);
+      }
+    }
+    
+    return { client: sentryClient, scope: isolatedScope };
+  } catch (error) {
+    // Log error but DO NOT throw - service worker must start regardless
+    console.error('[v0][Sentry] Failed to initialize Sentry in background worker:', error);
+    console.warn('[v0][Sentry] Extension will continue without Sentry monitoring');
+    
+    // Return dummy client/scope to prevent errors
+    const dummyScope = new Scope();
+    return { client: null, scope: dummyScope };
+  }
+}
+
+// Initialize on module load
+initializeSentry();
+
+function getCurrentClient(): BrowserClient | null {
+  return client;
+}
+
+function getCurrentScope(): Scope | null {
+  return scope;
+}
+
+/**
+ * Sentry object with methods that use the isolated scope
+ * Maintains compatibility with existing code
+ */
+export const Sentry = {
+  // Capture exception using isolated scope
+  captureException: (error: Error, hint?: any) => {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) return;
+    return captureWithIsolatedScope(error, hint, currentClient, currentScope);
+  },
+  
+  // Capture message using isolated scope
+  captureMessage: (message: string, level?: any) => {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) return;
+    return withIsolatedScope(currentClient, currentScope, (isolatedScope) =>
+      isolatedScope.captureMessage(message, level)
+    );
+  },
+  
+  // Logger methods using isolated scope
+  logger: {
+    info: (message: string, data?: any) => {
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      logWithIsolatedScope("info", message, data, currentClient, currentScope);
+    },
+    warn: (message: string, data?: any) => {
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      logWithIsolatedScope("warning", message, data, currentClient, currentScope);
+    },
+    error: (message: string, data?: any) => {
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      logWithIsolatedScope("error", message, data, currentClient, currentScope);
+    },
+  },
+  
+  // Start span using isolated scope
+  startSpan: <T,>(options: Parameters<typeof sentryStartSpan>[0], callback: Parameters<typeof sentryStartSpan>[1]): T => {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) {
+      // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
+      return callback(createNoOpSpan() as any) as T;
+    }
+    // Pass scope explicitly in options for manual clients
+    // This ensures startSpan uses our isolated scope instead of trying to access global Sentry context
+    return withIsolatedScope(
+      currentClient,
+      currentScope,
+      () => sentryStartSpan(options, callback) as T,
+      () => (callback(createNoOpSpan() as any) as T)
+    );
+  },
+  
+  // Get client (for advanced usage)
+  getClient: () => getCurrentClient(),
+  
+  // Get scope (for advanced usage)
+  getScope: () => getCurrentScope(),
+};
+
+// Export scope for advanced usage
+export { scope as scope };
+

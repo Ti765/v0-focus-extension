@@ -1,7 +1,19 @@
+// Initialize Sentry monitoring FIRST - before any other imports
+import "../lib/sentry-background";
+
 // Logs de inicialização bem no topo (aparecem mesmo se algo falhar depois)
 console.log("[v0] Service Worker starting up...");
 console.log("[v0] DEBUG: Extension version:", chrome.runtime.getManifest().version);
 console.log("[v0] DEBUG: Manifest permissions:", chrome.runtime.getManifest().permissions);
+
+void initializeAnalyticsConsentWatcher().catch((error) => {
+  console.warn("[v0] Analytics consent watcher failed to start:", error);
+});
+void Promise.resolve()
+  .then(() => initializeFirebaseAuthWatcher())
+  .catch((error) => {
+    console.warn("[v0] Firebase auth watcher failed to start:", error);
+  });
 
 import { initializePomodoro, startBreak } from "./modules/pomodoro";
 import {
@@ -22,6 +34,8 @@ import {
   DEFAULT_POMODORO_CONFIG,
 } from "../shared/constants";
 import type { AppState } from "../shared/types";
+import { initializeAnalyticsConsentWatcher } from "./modules/analytics-consent";
+import { initializeFirebaseAuthWatcher } from "./modules/firebase-auth";
 
 /** Bootstrap de todos os módulos do SW */
 async function bootstrap() {
@@ -316,6 +330,37 @@ async function initializeExtension(details: chrome.runtime.InstalledDetails) {
   console.log(`\nRules matching ${testUrl}:`, matching);
   return { dynamic, session, matching };
 };
+
+// Expose Sentry test functions (dev / explicit flag only)
+const shouldExposeSentryTests = (() => {
+  // Primary check: Vite's import.meta.env (injected at build-time)
+  try {
+    // @ts-ignore - import.meta.env is injected by Vite at build time
+    const env = import.meta.env;
+    if (env) {
+      const mode = env.MODE;
+      const nodeEnv = env.NODE_ENV;
+      if (mode === 'development' || nodeEnv === 'development') return true;
+      // Check for explicit test flag
+      if (env.VITE_SENTRY_TEST_EXPOSE === 'true' || env.SENTRY_TEST_EXPOSE === 'true') return true;
+    }
+  } catch {
+    // import.meta.env may not be available, continue to fallback checks
+  }
+  return false;
+})();
+
+if (shouldExposeSentryTests) {
+  (globalThis as any).testSentryBackground = async () => {
+    const { testSentryBackground } = await import("../lib/sentry-test");
+    await testSentryBackground();
+  };
+
+  (globalThis as any).testSentryComprehensive = async () => {
+    const { testSentryComprehensive } = await import("../lib/sentry-test");
+    await testSentryComprehensive("background");
+  };
+}
 
 /** onStartup: re-inicializa módulos (navegador aberto) */
 function handleStartup() {

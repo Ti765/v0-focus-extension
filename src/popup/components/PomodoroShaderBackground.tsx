@@ -35,7 +35,6 @@ export default function PomodoroShaderBackground({
         className="w-full h-full absolute inset-0"
         colors={orangeColors}
         speed={sanitizedSpeed * intensity}
-        backgroundColor="#000000"
       />
 
       {/* Lighting overlay effects - EXATAMENTE como no exemplo original */}

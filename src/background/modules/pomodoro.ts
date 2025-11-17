@@ -3,18 +3,46 @@ import type { PomodoroState, PomodoroConfig } from "../../shared/types";
 import { enablePomodoroBlocking, disablePomodoroBlocking } from "./blocker";
 import { notifyStateUpdate } from "./message-handler";
 import { createNotification } from "./notification-helper";
+import { Sentry } from "../../lib/sentry-background";
 
 export async function initializePomodoro() {
-  console.log("[v0] Initializing Pomodoro module");
-  
-  // Check for active timer and recover if needed
-  await recoverActiveTimer();
-  
-  chrome.alarms.onAlarm.addListener(async (alarm) => {
-    if (alarm.name === ALARM_NAMES.POMODORO) {
-      await handlePomodoroAlarm();
+  return Sentry.startSpan(
+    { op: "module.init", name: "Initialize Pomodoro" },
+    async (span) => {
+      // Helper to safely set span attributes
+      const setSpanAttribute = (key: string, value: unknown) => {
+        if (span && typeof span.setAttribute === 'function') {
+          // Convert unknown to SpanAttributeValue (string | number | boolean)
+          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
+            ? value 
+            : String(value);
+          span.setAttribute(key, safeValue);
+        }
+      };
+
+      try {
+        console.log("[v0] Initializing Pomodoro module");
+        Sentry.logger.info("Pomodoro module initializing");
+        
+        // Check for active timer and recover if needed
+        await recoverActiveTimer();
+        
+        chrome.alarms.onAlarm.addListener(async (alarm) => {
+          if (alarm.name === ALARM_NAMES.POMODORO) {
+            await handlePomodoroAlarm();
+          }
+        });
+        
+        Sentry.logger.info("Pomodoro module initialized successfully");
+        setSpanAttribute("success", true);
+      } catch (error) {
+        Sentry.logger.error("Failed to initialize Pomodoro module", { error });
+        setSpanAttribute("success", false);
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
+        throw error;
+      }
     }
-  });
+  );
 }
 
 async function recoverActiveTimer() {

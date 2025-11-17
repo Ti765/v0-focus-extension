@@ -47,6 +47,75 @@ export interface DailyUsage {
 }
 
 /* =========================
+ * Domínio: Analytics / Firestore
+ * ========================= */
+
+export interface DomainUsageStats {
+  minutes: number;
+  visits: number;
+  firstVisit?: RFC3339String;
+  lastVisit?: RFC3339String;
+}
+
+export interface FeatureUsageEntry {
+  count: number;
+  totalTime?: number;
+}
+
+export interface SearchInsights {
+  topQueries: Record<string, number>;
+  categorizedQueries: Record<string, number>;
+  lastSearchedAt?: RFC3339String;
+}
+
+export interface ContentInsights {
+  topDomainsConsumed: Record<string, number>;
+  categorizedContent: Record<string, number>;
+  topContentKeywords: Record<string, number>;
+  lastConsumedAt?: RFC3339String;
+}
+
+export interface PomodoroInsights {
+  focusMinutes: number;
+  cyclesCompleted: number;
+  breaks: number;
+  longBreaks: number;
+  interruptions: number;
+}
+
+export interface BrowserMetadata {
+  browserName?: string;
+  browserVersion?: string;
+  os?: string;
+  extensionVersion?: string;
+  locale?: string;
+}
+
+export interface DailySummary {
+  date: ISODateString;
+  totalMinutes: number;
+  totalActiveMinutes: number;
+  totalUniqueSitesVisited: number;
+  firstActivityAt?: RFC3339String;
+  lastActivityAt?: RFC3339String;
+  perDomain: Record<string, DomainUsageStats>;
+  pomodoro: PomodoroInsights;
+  toggles: Record<string, number>;
+  featureUsage: Record<string, FeatureUsageEntry>;
+  searchInsights: SearchInsights;
+  contentInsights: ContentInsights;
+  browserInfo?: BrowserMetadata;
+  lastUpdateLocal?: RFC3339String;
+}
+
+export interface PendingDailySummarySync {
+  date: ISODateString;
+  summary: DailySummary;
+  retries: number;
+  lastTriedAt?: RFC3339String;
+}
+
+/* =========================
  * Domínio: Pomodoro
  * ========================= */
 
@@ -90,6 +159,7 @@ export interface YouTubeCustomization {
   hideShorts: boolean;
   hideComments: boolean;
   hideRecommendations: boolean;
+  selectorsToRemove?: string[];
 }
 export type SiteCustomization = YouTubeCustomization;
 export type SiteCustomizationMap = Record<string, SiteCustomization>;
@@ -107,6 +177,10 @@ export interface UserSettings {
   timezone?: string;
   telemetry?: boolean;
   debugDNR?: boolean; // Debug flag for DNR (Declarative Net Request) operations
+  debugTracking?: boolean;
+  debugContentAnalysis?: boolean;
+  debugPomodoro?: boolean;
+  debugZenMode?: boolean;
   // Backward compatibility - UI currently references these in places
   analyticsConsent?: boolean;
   notificationsEnabled?: boolean;
@@ -175,6 +249,8 @@ export const MESSAGE = {
   // Content analysis / other
   CONTENT_ANALYSIS_RESULT: "CONTENT_ANALYSIS_RESULT",
   TOGGLE_ZEN_MODE: "TOGGLE_ZEN_MODE",
+  ANALYTICS_CONTENT_AGGREGATE: "ANALYTICS_CONTENT_AGGREGATE",
+  ANALYTICS_AUTH_CHANGED: "ANALYTICS_AUTH_CHANGED",
 } as const;
 
 export type MessageType = typeof MESSAGE[keyof typeof MESSAGE];
@@ -236,6 +312,24 @@ export type ContentAnalysisResultPayload =
   | { result: ContentAnalysisResult };
 
 export interface ToggleZenPayload { preset?: string }
+export interface ContentAggregatePayload {
+  url: string;
+  title?: string;
+  description?: string;
+  keywords?: string[];
+  categories?: string[];
+  estimatedTimeSpent?: number; // seconds
+  source?: ContextSource;
+  domain?: string;
+}
+
+export interface AuthStatusPayload {
+  status: "signed-in" | "signed-out";
+  uid?: UserId;
+  email?: string;
+  displayName?: string;
+  photoURL?: string;
+}
 
 export interface ErrorPayload { code: string; message: string; details?: JSONValue; }
 export type PingPayload = { echo?: JSONValue };
@@ -262,7 +356,9 @@ export type Message =
   | BaseMessage<typeof MESSAGE.PONG, PongPayload>
   | BaseMessage<typeof MESSAGE.ERROR, ErrorPayload>
   | BaseMessage<typeof MESSAGE.CONTENT_ANALYSIS_RESULT, ContentAnalysisResultPayload>
-  | BaseMessage<typeof MESSAGE.TOGGLE_ZEN_MODE, ToggleZenPayload>;
+  | BaseMessage<typeof MESSAGE.TOGGLE_ZEN_MODE, ToggleZenPayload>
+  | BaseMessage<typeof MESSAGE.ANALYTICS_CONTENT_AGGREGATE, ContentAggregatePayload>
+  | BaseMessage<typeof MESSAGE.ANALYTICS_AUTH_CHANGED, AuthStatusPayload>;
 
 /** Respostas opcionais do SW (shape genérico) */
 export type MessageResponse<T = unknown> =

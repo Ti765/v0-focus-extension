@@ -189,7 +189,6 @@ export async function createNotification(
     // Create notification
     console.debug("[v0][Notifications] Calling chrome.notifications.create...");
     const notificationId = await chrome.notifications.create(
-      options.notificationId,
       notificationOptions
     );
 

@@ -1,11 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { BarChart3, Clock, Shield, Settings, LogOut, Focus } from "lucide-react"
+import { BarChart3, Clock, Shield, Settings, LogOut, LogIn, Focus } from "lucide-react"
 import DashboardView from "./views/DashboardView"
 import TimeLimitsView from "./views/TimeLimitsView"
 import SiteBlockingView from "./views/SiteBlockingView"
 import SettingsView from "./views/SettingsView"
+import { useFirebaseUser } from "../lib/firebase/useFirebaseUser"
 
 type View = "dashboard" | "time-limits" | "site-blocking" | "settings"
 
@@ -33,6 +34,26 @@ function renderView(activeView: View) {
 
 export default function OptionsApp() {
   const [activeView, setActiveView] = useState<View>("dashboard")
+  const {
+    user,
+    loading: authLoading,
+    signInWithGoogle,
+    signOutFromGoogle,
+  } = useFirebaseUser({ source: "panel-ui" })
+
+  const AuthIcon = user ? LogOut : LogIn
+  const authButtonClasses = user
+    ? "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-200 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed border border-red-500/30"
+    : "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-200 hover:text-emerald-300 hover:bg-emerald-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-400/30"
+
+  const handleAuthButtonClick = () => {
+    if (authLoading) return
+    if (user) {
+      void signOutFromGoogle()
+    } else {
+      void signInWithGoogle()
+    }
+  }
 
   return (
     <div className="min-h-screen p-4 md:p-6 bg-[#0d0d1a] text-gray-200">
@@ -77,9 +98,15 @@ export default function OptionsApp() {
               </nav>
 
               <div className="mt-auto pt-6 border-t border-white/10">
-                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all">
-                  <LogOut className="w-5 h-5" />
-                  <span className="font-semibold text-sm">Sair</span>
+                <button
+                  onClick={handleAuthButtonClick}
+                  disabled={authLoading}
+                  className={authButtonClasses}
+                >
+                  <AuthIcon className="w-5 h-5" />
+                  <span className="font-semibold text-sm">
+                    {user ? "Sair da conta" : "Entrar com Google"}
+                  </span>
                 </button>
               </div>
             </div>

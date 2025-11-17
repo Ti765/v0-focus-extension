@@ -2,26 +2,61 @@
 
 # dependencies
 /node_modules
+# lock files - keep package-lock.json but ignore others if you use different package managers
+# package-lock.json should be committed
+yarn.lock
+pnpm-lock.yaml
 
-# next.js
-/.next/
-/out/
-
-# production
+# build outputs
+/dist
 /build
+*.tsbuildinfo
 
-# debug
+# environment variables
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+!.env.example
+
+# testing
+/coverage
+*.lcov
+.nyc_output
+
+# Vite cache
+.vite
+.vite-cache
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# logs
+logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+lerna-debug.log*
 
-# env files
-.env*
+# Chrome extension build artifacts
+*.crx
+*.pem
+*.zip
+*.xpi
 
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini

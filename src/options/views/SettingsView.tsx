@@ -4,6 +4,7 @@ import type { UserSettings, AppState, Message, MessageId } from "../../shared/ty
 import { MESSAGE } from "../../shared/types";
 import { chromeAPI, isChromeExtension } from "../../shared/chrome-mock";
 import { DEFAULT_SETTINGS } from "../../shared/constants";
+import { useFirebaseUser } from "../../lib/firebase/useFirebaseUser";
 
 declare const chrome: any;
 
@@ -26,6 +27,13 @@ function uuid(): string {
 export default function SettingsView() {
   const [settings, setSettings] = useState<UserSettings>({ ...DEFAULT_SETTINGS });
   const [initError, setInitError] = useState<null | Error>(null);
+  const {
+    user: firebaseUser,
+    loading: authLoading,
+    error: authError,
+    signInWithGoogle,
+    signOutFromGoogle,
+  } = useFirebaseUser({ source: "panel-ui" });
 
   useEffect(() => {
     loadSettings();
@@ -180,6 +188,66 @@ export default function SettingsView() {
         </div>
       </div>
 
+      <div className="glass-card p-6 space-y-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">
+              SINCRONIZAÇÃO & PRIVACIDADE
+            </h3>
+            <p className="text-gray-400 text-sm">
+              Processamos tudo localmente e só enviamos resumos agregados ao Firestore com seu consentimento.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
+          <div className="flex flex-col">
+            <span className="text-white font-medium">Enviar resumos diários</span>
+            <span className="text-xs text-gray-400">
+              Inclui top sites, buscas categorizadas e minutos focados.
+            </span>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!settings.analyticsConsent}
+              onChange={(e) => updateSetting("analyticsConsent", e.target.checked as any)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            <span className="ml-3 text-sm text-gray-400">
+              {settings.analyticsConsent ? "Ativo" : "Desativado"}
+            </span>
+          </label>
+        </div>
+
+        <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white font-medium">Conta Firebase</p>
+              <p className="text-xs text-gray-400">
+                {firebaseUser
+                  ? firebaseUser.email || firebaseUser.displayName || "Conta conectada"
+                  : "Conecte-se com Google para sincronizar com segurança."}
+              </p>
+            </div>
+            <button
+              onClick={() => (firebaseUser ? signOutFromGoogle() : signInWithGoogle())}
+              disabled={authLoading || !settings.analyticsConsent}
+              className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/40 border border-blue-500/30 rounded-lg text-sm text-blue-100 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {firebaseUser ? "Desconectar" : "Entrar com Google"}
+            </button>
+          </div>
+          {authError ? <p className="text-xs text-red-400 mt-2">{authError}</p> : null}
+          {!settings.analyticsConsent ? (
+            <p className="text-xs text-yellow-400 mt-2">
+              Ative o envio de resumos para liberar a sincronização.
+            </p>
+          ) : null}
+        </div>
+      </div>
+
       <div className="glass-card p-6">
         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">NOTIFICAÇÕES</h3>
 
@@ -217,22 +285,6 @@ export default function SettingsView() {
             </label>
           </div>
 
-          <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10">
-            <div className="flex items-center gap-3">
-              <Bell className="w-5 h-5 text-gray-400" />
-              <span className="text-white font-medium">Notificação de Resumo Diário</span>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!settings.analyticsConsent}
-                onChange={(e) => updateSetting("analyticsConsent", e.target.checked as any)}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              <span className="ml-3 text-sm text-gray-400">{settings.analyticsConsent ? "On" : "Off"}</span>
-            </label>
-          </div>
         </div>
       </div>
     </div>

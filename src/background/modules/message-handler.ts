@@ -1,4 +1,4 @@
-import type { Message, AppState } from "../../shared/types";
+import type { Message, AppState, ContentAggregatePayload } from "../../shared/types";
 import { MESSAGE } from "../../shared/types";
 import {
   STORAGE_KEYS,
@@ -9,9 +9,93 @@ import { addToBlacklist, removeFromBlacklist } from "./blocker";
 import { startPomodoro, stopPomodoro, pausePomodoro, resumePomodoro, startBreak } from "./pomodoro";
 import { setTimeLimit } from "./usage-tracker";
 import { handleContentAnalysisResult } from "./content-analyzer";
+import { recordContentAggregate } from "./daily-summary";
+import { extractDomain } from "../../shared/url";
+import { Sentry } from "../../lib/sentry-background";
 
 // Hash do último estado emitido para evitar broadcasts desnecessários
 let lastEmittedHash: string = "";
+
+const MAX_SPAN_VALUE_LENGTH = 120;
+const MAX_CONTENT_LIST = 20;
+
+function sanitizeSpanValue(value: unknown): string | number | boolean {
+  if (typeof value === "string") {
+    return value.length > MAX_SPAN_VALUE_LENGTH ? `${value.slice(0, MAX_SPAN_VALUE_LENGTH)}…` : value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  return `[${typeof value}]`;
+}
+
+function sanitizeSenderUrl(url?: string | null): string {
+  if (!url) {
+    return "unknown";
+  }
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname || "unknown";
+  } catch {
+    return "invalid";
+  }
+}
+
+function normalizeStringArray(value: unknown, maxEntries: number = MAX_CONTENT_LIST): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, maxEntries);
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeContentAggregatePayload(raw: unknown): ContentAggregatePayload | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const payload = raw as Partial<ContentAggregatePayload>;
+  if (typeof payload.url !== "string" || payload.url.length > 2048) {
+    return null;
+  }
+
+  const sanitizeField = (value: unknown, limit: number = 500) => {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    return trimmed.length > limit ? `${trimmed.slice(0, limit)}…` : trimmed;
+  };
+
+  const normalized: ContentAggregatePayload = {
+    url: payload.url,
+    title: sanitizeField(payload.title),
+    description: sanitizeField(payload.description),
+    keywords: normalizeStringArray(payload.keywords),
+    categories: normalizeStringArray(payload.categories),
+    estimatedTimeSpent:
+      typeof payload.estimatedTimeSpent === "number" && Number.isFinite(payload.estimatedTimeSpent)
+        ? Math.max(0, payload.estimatedTimeSpent)
+        : undefined,
+    source: typeof payload.source === "string" ? payload.source : undefined,
+    domain: typeof payload.domain === "string" ? payload.domain : undefined,
+  };
+
+  if (!normalized.domain) {
+    normalized.domain = extractDomain(payload.url);
+  }
+
+  return normalized;
+}
 
 /** Notifica todas as UIs (popup/options) que o state mudou */
 export async function notifyStateUpdate() {
@@ -172,158 +256,231 @@ export async function handleMessage(
   message: Message & { skipNotify?: boolean },
   _sender: chrome.runtime.MessageSender
 ): Promise<any> {
-  console.log("[v0] DEBUG: Message handler - type:", message.type);
-  console.log("[v0] DEBUG: Message handler - payload:", message.payload);
-  console.log("[v0] DEBUG: Message handler - sender:", _sender);
-
-  switch (message.type) {
-    case MESSAGE.GET_INITIAL_STATE: {
-      return await getAppState();
-    }
-
-    case MESSAGE.ADD_TO_BLACKLIST: {
-      const domain = (message.payload as any)?.domain;
-      if (typeof domain === "string") await addToBlacklist(domain);
-      await notifyStateUpdate();
-      return { success: true };
-    }
-
-    case MESSAGE.REMOVE_FROM_BLACKLIST: {
-      const domain = (message.payload as any)?.domain;
-      if (typeof domain === "string") await removeFromBlacklist(domain);
-      await notifyStateUpdate();
-      return { success: true };
-    }
-
-    case MESSAGE.POMODORO_START: {
-      const payload = message.payload as any;
-      console.log("[v0] DEBUG: POMODORO_START - full payload:", JSON.stringify(payload));
-      console.log("[v0] DEBUG: POMODORO_START - payload.config:", JSON.stringify(payload?.config));
-      
-      // Extrai apenas o config do payload
-      const config = payload?.config || payload;
-      console.log("[v0] DEBUG: POMODORO_START - extracted config:", JSON.stringify(config));
-      
-      await startPomodoro(config);
-      return { success: true };
-    }
-
-    case MESSAGE.POMODORO_STOP: {
-      await stopPomodoro();
-      return { success: true };
-    }
-
-    case MESSAGE.POMODORO_PAUSE: {
-      await pausePomodoro();
-      return { success: true };
-    }
-
-    case MESSAGE.POMODORO_RESUME: {
-      await resumePomodoro();
-      return { success: true };
-    }
-
-    case MESSAGE.START_BREAK: {
-      await startBreak();
-      return { success: true };
-    }
-
-    case MESSAGE.TIME_LIMIT_SET: {
-      const payload = message.payload as any;
-      const domain = payload?.domain;
-      const minutes = payload?.dailyMinutes ?? payload?.limitMinutes;
-      if (typeof domain === "string" && typeof minutes === "number") {
-        await setTimeLimit(domain, minutes);
-      }
-      await notifyStateUpdate();
-      return { success: true };
-    }
-
-    case MESSAGE.CONTENT_ANALYSIS_RESULT: {
-      await handleContentAnalysisResult((message.payload as any)?.result);
-      await notifyStateUpdate();
-      return { success: true };
-    }
-
-    case MESSAGE.STATE_PATCH: {
-      const raw = message.payload ?? {};
-      // Simplified payload extraction with defensive handling
-      const patch = (raw as any).patch?.settings ?? (raw as any).settings ?? raw;
-
-      if (!patch || typeof patch !== 'object') {
-        return { success: false, error: "Invalid STATE_PATCH payload" };
-      }
-
-      const { [STORAGE_KEYS.SETTINGS]: current } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
-      const next = { ...(current ?? {}), ...(patch ?? {}) };
-
-      // Avoid writing identical settings which can cause UI echo loops
-      const currentJson = JSON.stringify(current ?? {});
-      const nextJson = JSON.stringify(next);
-      if (currentJson === nextJson) {
-        // nothing changed
-        return { success: true };
-      }
-
-      await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: next });
-      await notifyStateUpdate();
-      return { success: true };
-    }
-
-    case MESSAGE.SITE_CUSTOMIZATION_UPDATED: {
-      const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } =
-        await chrome.storage.local.get(STORAGE_KEYS.SITE_CUSTOMIZATIONS);
-      // Payload may be either a map of domain->config or { domain, config }
-      const payload = message.payload as any;
-      let updatedCustomizations: Record<string, any> = { ...(siteCustomizations ?? {}) };
-      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-        if (payload.domain && payload.config) {
-          // single entry
-          updatedCustomizations = { ...updatedCustomizations, [String(payload.domain)]: payload.config };
-        } else {
-          // assume a map of domain->config and merge
-          updatedCustomizations = { ...updatedCustomizations, ...payload };
+  return Sentry.startSpan(
+    { 
+      op: "message.handle", 
+      name: `Handle Message: ${message.type}` 
+    },
+    async (span) => {
+      // Helper to safely set span attributes
+      const setSpanAttribute = (key: string, value: unknown) => {
+        if (span && typeof span.setAttribute === "function") {
+          span.setAttribute(key, sanitizeSpanValue(value));
         }
-      }
-      await chrome.storage.local.set({ [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: updatedCustomizations });
-      await notifyStateUpdate();
-      return { success: true };
-    }
+      };
 
-    case MESSAGE.TOGGLE_ZEN_MODE: {
-      // Envia ao content script da aba ativa (pode falhar em páginas protegidas)
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id) {
-        try {
-          await chrome.tabs.sendMessage(tab.id, {
-            type: MESSAGE.TOGGLE_ZEN_MODE,
-            payload: message.payload,
-          });
-        } catch (error) {
-          // Evita derrubar o SW em páginas que não aceitam mensagens
-          console.warn(
-            `[v0] Could not send TOGGLE_ZEN_MODE to tab ${tab.id}. ` +
-              `It may be a protected page or the content script wasn't injected.`,
-            error
-          );
-          // Retornamos sucesso para não quebrar a UI; a ação simplesmente não ocorreu.
+      try {
+
+        setSpanAttribute("message_type", message.type);
+        setSpanAttribute("has_payload", !!message.payload);
+        setSpanAttribute("sender_id", _sender.id || "unknown");
+        setSpanAttribute("sender_url_host", sanitizeSenderUrl(_sender.url));
+
+        let result: any;
+
+        switch (message.type) {
+          case MESSAGE.GET_INITIAL_STATE: {
+            result = await getAppState();
+            break;
+          }
+
+          case MESSAGE.ADD_TO_BLACKLIST: {
+            const domain = (message.payload as any)?.domain;
+            if (typeof domain === "string") {
+              await addToBlacklist(domain);
+              setSpanAttribute("domain", domain);
+            }
+            await notifyStateUpdate();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.REMOVE_FROM_BLACKLIST: {
+            const domain = (message.payload as any)?.domain;
+            if (typeof domain === "string") await removeFromBlacklist(domain);
+            await notifyStateUpdate();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.POMODORO_START: {
+            const payload = message.payload as any;
+            console.log("[v0] DEBUG: POMODORO_START - full payload:", JSON.stringify(payload));
+            console.log("[v0] DEBUG: POMODORO_START - payload.config:", JSON.stringify(payload?.config));
+            
+            // Extrai apenas o config do payload
+            const config = payload?.config || payload;
+            console.log("[v0] DEBUG: POMODORO_START - extracted config:", JSON.stringify(config));
+            
+            await startPomodoro(config);
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.POMODORO_STOP: {
+            await stopPomodoro();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.POMODORO_PAUSE: {
+            await pausePomodoro();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.POMODORO_RESUME: {
+            await resumePomodoro();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.START_BREAK: {
+            await startBreak();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.TIME_LIMIT_SET: {
+            const payload = message.payload as any;
+            const domain = payload?.domain;
+            const minutes = payload?.dailyMinutes ?? payload?.limitMinutes;
+            if (typeof domain === "string" && typeof minutes === "number") {
+              await setTimeLimit(domain, minutes);
+            }
+            await notifyStateUpdate();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.CONTENT_ANALYSIS_RESULT: {
+            await handleContentAnalysisResult((message.payload as any)?.result);
+            await notifyStateUpdate();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.ANALYTICS_CONTENT_AGGREGATE: {
+            const payload = normalizeContentAggregatePayload(message.payload);
+            if (!payload) {
+              result = { success: false, error: "Invalid content aggregate payload" };
+              break;
+            }
+            await recordContentAggregate(payload);
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.ANALYTICS_AUTH_CHANGED: {
+            // Auth watcher já é gerenciado diretamente pelo Firebase no SW.
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.STATE_PATCH: {
+            const raw = message.payload ?? {};
+            // Simplified payload extraction with defensive handling
+            const patch = (raw as any).patch?.settings ?? (raw as any).settings ?? raw;
+
+            if (!patch || typeof patch !== 'object') {
+              result = { success: false, error: "Invalid STATE_PATCH payload" };
+              break;
+            }
+
+            const { [STORAGE_KEYS.SETTINGS]: current } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+            const next = { ...(current ?? {}), ...(patch ?? {}) };
+
+            // Avoid writing identical settings which can cause UI echo loops
+            const currentJson = JSON.stringify(current ?? {});
+            const nextJson = JSON.stringify(next);
+            if (currentJson === nextJson) {
+              // nothing changed
+              result = { success: true };
+              break;
+            }
+
+            await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: next });
+            await notifyStateUpdate();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.SITE_CUSTOMIZATION_UPDATED: {
+            const { [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: siteCustomizations } =
+              await chrome.storage.local.get(STORAGE_KEYS.SITE_CUSTOMIZATIONS);
+            // Payload may be either a map of domain->config or { domain, config }
+            const payload = message.payload as any;
+            let updatedCustomizations: Record<string, any> = { ...(siteCustomizations ?? {}) };
+            if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+              if (payload.domain && payload.config) {
+                // single entry
+                updatedCustomizations = { ...updatedCustomizations, [String(payload.domain)]: payload.config };
+              } else {
+                // assume a map of domain->config and merge
+                updatedCustomizations = { ...updatedCustomizations, ...payload };
+              }
+            }
+            await chrome.storage.local.set({ [STORAGE_KEYS.SITE_CUSTOMIZATIONS]: updatedCustomizations });
+            await notifyStateUpdate();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.TOGGLE_ZEN_MODE: {
+            // Envia ao content script da aba ativa (pode falhar em páginas protegidas)
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tab?.id) {
+              try {
+                await chrome.tabs.sendMessage(tab.id, {
+                  type: MESSAGE.TOGGLE_ZEN_MODE,
+                  payload: message.payload,
+                });
+              } catch (error) {
+                // Evita derrubar o SW em páginas que não aceitam mensagens
+                console.warn(
+                  `[v0] Could not send TOGGLE_ZEN_MODE to tab ${tab.id}. ` +
+                    `It may be a protected page or the content script wasn't injected.`,
+                  error
+                );
+                // Retornamos sucesso para não quebrar a UI; a ação simplesmente não ocorreu.
+              }
+            }
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.STATE_UPDATED: {
+            // Não deve vir de clientes; logamos para visibilidade
+            console.warn(
+              "[v0] Received a 'STATE_UPDATED' message from a client, which should not happen."
+            );
+            result = { success: false, error: "Invalid message type received." };
+            break;
+          }
+
+          default: {
+            // Checagem exaustiva em tempo de compilação
+            const exhaustiveCheck: never = message.type as never;
+            const error = new Error(`Unknown message type: ${exhaustiveCheck}`);
+            Sentry.logger.error("Unknown message type received", { 
+              type: message.type 
+            });
+            throw error;
+          }
         }
+
+
+        setSpanAttribute("success", true);
+        return result;
+      } catch (error) {
+        Sentry.logger.error("Message handling failed", { 
+          type: message.type,
+          error 
+        });
+        setSpanAttribute("success", false);
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
+        throw error;
       }
-      return { success: true };
     }
-
-    case MESSAGE.STATE_UPDATED: {
-      // Não deve vir de clientes; logamos para visibilidade
-      console.warn(
-        "[v0] Received a 'STATE_UPDATED' message from a client, which should not happen."
-      );
-      return { success: false, error: "Invalid message type received." };
-    }
-
-    default: {
-      // Checagem exaustiva em tempo de compilação
-      const exhaustiveCheck: never = message.type as never;
-      throw new Error(`Unknown message type: ${exhaustiveCheck}`);
-    }
-  }
+  );
 }

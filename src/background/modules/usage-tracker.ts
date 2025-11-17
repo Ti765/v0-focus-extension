@@ -1,12 +1,14 @@
 import { STORAGE_KEYS, ALARM_NAMES, USAGE_TRACKER_INTERVAL } from "../../shared/constants";
 import type { TimeLimitEntry } from "../../shared/types";
-import { notifyStateUpdate, notificationsAllowed } from "./message-handler";
+import { notifyStateUpdate } from "./message-handler";
 import { normalizeDomain, extractDomain } from "../../shared/url";
 import { createDomainUrlFilter } from "../../shared/regex-utils";
 import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-config";
 
 // Import debug configuration
 import { isTrackingDebugEnabledSync } from "../../shared/debug-config";
+import { recordDomainUsage } from "./daily-summary";
+import { maybeRecordSearchFromUrl } from "./search-insights";
 
 // --- Estado interno ---
 let activeTabId: number | null = null;
@@ -267,11 +269,26 @@ async function recordActiveTabUsage() {
   dailyUsage[today].perDomain[domain] = (dailyUsage[today].perDomain[domain] || 0) + timeSpent;
   
   // Update total minutes for the day
-  dailyUsage[today].totalMinutes = Object.values(dailyUsage[today].perDomain).reduce((sum: number, time: number) => sum + time, 0) / 60;
+  dailyUsage[today].totalMinutes = Object.values(dailyUsage[today].perDomain).reduce((sum: number, time: unknown) => {
+    const timeValue = typeof time === 'number' ? time : 0;
+    return sum + timeValue;
+  }, 0) / 60;
 
   await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
 
   console.log("[v0] Recorded usage:", domain, timeSpent, "seconds");
+
+  try {
+    await recordDomainUsage(domain, timeSpent);
+  } catch (error) {
+    console.warn("[v0] Analytics daily summary update failed:", error);
+  }
+
+  try {
+    await maybeRecordSearchFromUrl(trackingInfo.url);
+  } catch (error) {
+    console.warn("[v0] Search insight enrichment failed:", error);
+  }
 
   await notifyStateUpdate();
 

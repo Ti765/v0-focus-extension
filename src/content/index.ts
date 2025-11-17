@@ -1,13 +1,17 @@
-import type { Message, ContentAnalysisResult, MessageId } from "../shared/types";
+// Initialize Sentry monitoring FIRST
+import "../lib/sentry-content";
+
+import type { Message, ContentAnalysisResult, MessageId, ContentAggregatePayload } from "../shared/types";
 import { MAX_TEXT_LENGTH, STORAGE_KEYS } from "../shared/constants";
 import { MESSAGE } from "../shared/types";
 
 // Import DOMPurify with proper browser support
 import DOMPurify from "dompurify";
+import { extractTopKeywords } from "../lib/insights/textProcessing";
 
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 // Updated YouTube selectors for 2025 layout
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 const YOUTUBE_SELECTORS = {
   hideHomepage: [
     'ytd-rich-grid-renderer',              // Main video grid
@@ -36,16 +40,27 @@ const YOUTUBE_SELECTORS = {
   ]
 };
 
-// ─────────────────────────────────────────────────────────────
-// Anti-reinjeção: marca que o CS já está presente
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
+// Anti-reinje��o: marca que o CS j� est� presente
+// -------------------------------------------------------------
 (window as any).v0ContentScriptInjected = true;
 
 console.log("[v0][CS] Content script loaded");
+const IGNORABLE_RUNTIME_ERRORS = [
+  "Receiving end does not exist",
+  "The message port closed before a response was received",
+  "Could not establish connection. Receiving end does not exist",
+  "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received",
+];
 
-// ─────────────────────────────────────────────────────────────
-// Verificação imediata de domínios bloqueados (cache bypass)
-// ─────────────────────────────────────────────────────────────
+function shouldIgnoreRuntimeError(err?: chrome.runtime.LastError | null) {
+  const message = err?.message ?? "";
+  return IGNORABLE_RUNTIME_ERRORS.some((prefix) => message === prefix || message.startsWith(prefix));
+}
+
+// -------------------------------------------------------------
+// Verifica��o imediata de dom�nios bloqueados (cache bypass)
+// -------------------------------------------------------------
 (async function checkIfBlockedDomain() {
   try {
     const currentDomain = location.hostname;
@@ -59,10 +74,10 @@ console.log("[v0][CS] Content script loaded");
       
       if (isBlocked) {
         console.log('[v0][CS] Blocked domain loaded from cache, redirecting...');
-        // Redirecionar para página de bloqueio customizada
+        // Redirecionar para p�gina de bloqueio customizada
         const blockedPageUrl = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(currentDomain)}`);
         location.href = blockedPageUrl;
-        return; // Para execução do resto do script
+        return; // Para execu��o do resto do script
       }
     }
   } catch (e) {
@@ -70,18 +85,32 @@ console.log("[v0][CS] Content script loaded");
   }
 })();
 
-// Evita múltiplas análises na mesma navegação
+// Evita m�ltiplas an�lises na mesma navega��o
 let hasAnalyzed = false;
+const CONTENT_AGGREGATE_DELAY_MS = 15_000;
+const contentSessionStart = Date.now();
+let contentInsightsSent = false;
+let contentAggregateTimeout: number | undefined;
 
-// ─────────────────────────────────────────────────────────────
+scheduleContentAggregate();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    void sendContentAggregate("hidden");
+  }
+});
+
+window.addEventListener("pagehide", () => void sendContentAggregate("pagehide"));
+window.addEventListener("beforeunload", () => void sendContentAggregate("beforeunload"));
+// -------------------------------------------------------------
 // Listener robusto de mensagens vindas do Service Worker
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   try {
     if (message?.type === MESSAGE.TOGGLE_ZEN_MODE) {
       toggleZenMode((message as any).payload?.preset);
       sendResponse?.({ success: true });
-      return true; // mantém a porta aberta caso algo seja async
+      return true; // mant�m a porta aberta caso algo seja async
     }
     
     if (message?.type === MESSAGE.SITE_CUSTOMIZATION_UPDATED) {
@@ -99,9 +128,9 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
   return false;
 });
 
-// ─────────────────────────────────────────────────────────────
-// Análise de conteúdo com guard p/ não rodar múltiplas vezes
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
+// An�lise de conte�do com guard p/ n�o rodar m�ltiplas vezes
+// -------------------------------------------------------------
 const analyzePageContent = async () => {
   if (hasAnalyzed) return;
   hasAnalyzed = true;
@@ -110,11 +139,11 @@ const analyzePageContent = async () => {
     const url = location.href;
       const result = await analyzeText(text, url);
       const id: MessageId = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`) as any;
-      await chrome.runtime.sendMessage({ type: MESSAGE.CONTENT_ANALYSIS_RESULT, id, source: "content-script", ts: Date.now(), payload: { result } } as unknown as Message, (response) => {
+      await chrome.runtime.sendMessage({ type: MESSAGE.CONTENT_ANALYSIS_RESULT, id, source: "content-script", ts: Date.now(), payload: { result } } as unknown as Message, () => {
         // Handle response or ignore errors
-        const err = chrome.runtime.lastError;
-        if (err && !err.message.includes("Receiving end does not exist") && !err.message.includes("message channel closed")) {
-          console.warn("[v0][CS] Content analysis message error:", err.message);
+        const err = chrome.runtime.lastError;
+        if (err && !shouldIgnoreRuntimeError(err)) {
+          console.warn("[v0][CS] Content analysis message error:", err.message ?? 'Unknown error');
         }
       });
   } catch (e) {
@@ -122,16 +151,86 @@ const analyzePageContent = async () => {
   }
 };
 
-// Dispara análise quando o DOM estiver pronto (sem duplicar)
+function scheduleContentAggregate() {
+  if (typeof contentAggregateTimeout === "number") {
+    window.clearTimeout(contentAggregateTimeout);
+  }
+  contentAggregateTimeout = window.setTimeout(() => {
+    void sendContentAggregate("timer");
+  }, CONTENT_AGGREGATE_DELAY_MS);
+}
+
+async function sendContentAggregate(trigger: string) {
+  if (contentInsightsSent) return;
+  contentInsightsSent = true;
+  if (typeof contentAggregateTimeout === "number") {
+    window.clearTimeout(contentAggregateTimeout);
+    contentAggregateTimeout = undefined;
+  }
+
+  const payload = buildContentAggregatePayload();
+  if (!payload) return;
+
+  payload.estimatedTimeSpent = Math.max(
+    1,
+    Math.round((Date.now() - contentSessionStart) / 1000)
+  );
+
+  try {
+    const id: MessageId = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`) as any;
+    await chrome.runtime.sendMessage(
+      {
+        type: MESSAGE.ANALYTICS_CONTENT_AGGREGATE,
+        id,
+        source: "content-script",
+        ts: Date.now(),
+        payload,
+      } as unknown as Message,
+      () => {
+        const err = chrome.runtime.lastError;
+        if (err && !shouldIgnoreRuntimeError(err)) {
+          console.warn("[v0][CS] Content insight message error:", err.message ?? 'Unknown error');
+        }
+      }
+    );
+  } catch (error) {
+    console.warn(`[v0][CS] Failed to send content aggregate (${trigger}):`, error);
+  }
+}
+
+function buildContentAggregatePayload(): ContentAggregatePayload | null {
+  const title = (document.title ?? "").trim();
+  const description = getMetaContent('meta[name="description"]');
+  const ogTitle = getMetaContent('meta[property="og:title"]');
+  const ogDescription = getMetaContent('meta[property="og:description"]');
+  const combined = [title, description, ogTitle, ogDescription].filter(Boolean).join(" ").trim();
+
+  const insight = combined ? extractTopKeywords(combined, 8) : { keywords: [], categories: [] };
+
+  return {
+    url: location.href,
+    title,
+    description,
+    keywords: insight.keywords ?? [],
+    categories: insight.categories ?? [],
+    domain: location.hostname,
+  };
+}
+
+function getMetaContent(selector: string): string {
+  return document.querySelector(selector)?.getAttribute("content")?.trim() ?? "";
+}
+
+// Dispara an�lise quando o DOM estiver pronto (sem duplicar)
 if (document.readyState === "complete" || document.readyState === "interactive") {
   analyzePageContent();
 } else {
   document.addEventListener("DOMContentLoaded", analyzePageContent, { once: true });
 }
 
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 // Initialize YouTube customizations
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 if (window.location.hostname.includes('youtube.com')) {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => loadAndApplyYouTubeCustomization(), { once: true });
@@ -140,16 +239,15 @@ if (window.location.hostname.includes('youtube.com')) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Scoring simples de conteúdo com keywords do usuário
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
+// Scoring simples de conte�do com keywords do usu�rio
+// -------------------------------------------------------------
 async function analyzeText(text: string, url: string): Promise<ContentAnalysisResult> {
   const { [STORAGE_KEYS.SETTINGS]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
   const productiveKeywords: string[] = settings?.productiveKeywords || [];
   const distractingKeywords: string[] = settings?.distractingKeywords || [];
 
   const lowerText = text.toLowerCase();
-  const lowerUrl = url.toLowerCase();
   
   // Also analyze page title and meta description
   const title = document.title.toLowerCase();
@@ -226,9 +324,9 @@ async function analyzeText(text: string, url: string): Promise<ContentAnalysisRe
   };
 }
 
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 // YouTube Customization Functions
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 
 /**
  * Applies YouTube-specific customizations based on user preferences
@@ -291,9 +389,9 @@ async function loadAndApplyYouTubeCustomization() {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 // Zen Mode (idempotente) - XSS Safe Implementation
-// ─────────────────────────────────────────────────────────────
+// -------------------------------------------------------------
 // Security Note: This implementation uses DOMPurify for robust XSS protection.
 // DOMPurify is a battle-tested library that sanitizes HTML content by removing
 // dangerous tags, attributes, and protocols. For plain text content, we use
@@ -314,7 +412,7 @@ function toggleZenMode(preset?: string) {
     
     document.body.classList.remove('zen-mode');
     
-    // Restaurar estado original para sites não-YouTube
+    // Restaurar estado original para sites n�o-YouTube
     if (!window.location.hostname.includes('youtube.com')) {
     if (originalContent !== null) {
         // Safely restore original content using DOM nodes instead of innerHTML
@@ -455,8 +553,7 @@ function applyZenMode(preset?: string) {
             SANITIZE_DOM: true,
             KEEP_CONTENT: true,
             RETURN_DOM: false,
-            RETURN_DOM_FRAGMENT: false,
-            RETURN_DOM_IMPORT: false
+            RETURN_DOM_FRAGMENT: false
           });
           
           // Set the sanitized HTML
@@ -476,7 +573,7 @@ function applyZenMode(preset?: string) {
       document.body.appendChild(originalContent.cloneNode(true));
       document.body.style.background = originalBackground;
     }
-    throw e; // será capturado pelo listener de mensagem
+    throw e; // ser� capturado pelo listener de mensagem
   }
 }
 
@@ -519,3 +616,5 @@ async function applyPreset(presetDomain: string) {
     console.warn("[v0][CS] applyPreset failed:", e);
   }
 }
+
+
