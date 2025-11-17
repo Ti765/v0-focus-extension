@@ -1,4 +1,4 @@
-import type { Message, AppState } from "../../shared/types";
+import type { Message, AppState, ContentAggregatePayload } from "../../shared/types";
 import { MESSAGE } from "../../shared/types";
 import {
   STORAGE_KEYS,
@@ -9,10 +9,93 @@ import { addToBlacklist, removeFromBlacklist } from "./blocker";
 import { startPomodoro, stopPomodoro, pausePomodoro, resumePomodoro, startBreak } from "./pomodoro";
 import { setTimeLimit } from "./usage-tracker";
 import { handleContentAnalysisResult } from "./content-analyzer";
+import { recordContentAggregate } from "./daily-summary";
+import { extractDomain } from "../../shared/url";
 import { Sentry } from "../../lib/sentry-background";
 
 // Hash do último estado emitido para evitar broadcasts desnecessários
 let lastEmittedHash: string = "";
+
+const MAX_SPAN_VALUE_LENGTH = 120;
+const MAX_CONTENT_LIST = 20;
+
+function sanitizeSpanValue(value: unknown): string | number | boolean {
+  if (typeof value === "string") {
+    return value.length > MAX_SPAN_VALUE_LENGTH ? `${value.slice(0, MAX_SPAN_VALUE_LENGTH)}…` : value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  return `[${typeof value}]`;
+}
+
+function sanitizeSenderUrl(url?: string | null): string {
+  if (!url) {
+    return "unknown";
+  }
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname || "unknown";
+  } catch {
+    return "invalid";
+  }
+}
+
+function normalizeStringArray(value: unknown, maxEntries: number = MAX_CONTENT_LIST): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, maxEntries);
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeContentAggregatePayload(raw: unknown): ContentAggregatePayload | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const payload = raw as Partial<ContentAggregatePayload>;
+  if (typeof payload.url !== "string" || payload.url.length > 2048) {
+    return null;
+  }
+
+  const sanitizeField = (value: unknown, limit: number = 500) => {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    return trimmed.length > limit ? `${trimmed.slice(0, limit)}…` : trimmed;
+  };
+
+  const normalized: ContentAggregatePayload = {
+    url: payload.url,
+    title: sanitizeField(payload.title),
+    description: sanitizeField(payload.description),
+    keywords: normalizeStringArray(payload.keywords),
+    categories: normalizeStringArray(payload.categories),
+    estimatedTimeSpent:
+      typeof payload.estimatedTimeSpent === "number" && Number.isFinite(payload.estimatedTimeSpent)
+        ? Math.max(0, payload.estimatedTimeSpent)
+        : undefined,
+    source: typeof payload.source === "string" ? payload.source : undefined,
+    domain: typeof payload.domain === "string" ? payload.domain : undefined,
+  };
+
+  if (!normalized.domain) {
+    normalized.domain = extractDomain(payload.url);
+  }
+
+  return normalized;
+}
 
 /** Notifica todas as UIs (popup/options) que o state mudou */
 export async function notifyStateUpdate() {
@@ -181,24 +264,17 @@ export async function handleMessage(
     async (span) => {
       // Helper to safely set span attributes
       const setSpanAttribute = (key: string, value: unknown) => {
-        if (span && typeof span.setAttribute === 'function') {
-          // Convert unknown to SpanAttributeValue (string | number | boolean)
-          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
-            ? value 
-            : String(value);
-          span.setAttribute(key, safeValue);
+        if (span && typeof span.setAttribute === "function") {
+          span.setAttribute(key, sanitizeSpanValue(value));
         }
       };
 
       try {
-        console.log("[v0] DEBUG: Message handler - type:", message.type);
-        console.log("[v0] DEBUG: Message handler - payload:", message.payload);
-        console.log("[v0] DEBUG: Message handler - sender:", _sender);
 
         setSpanAttribute("message_type", message.type);
         setSpanAttribute("has_payload", !!message.payload);
         setSpanAttribute("sender_id", _sender.id || "unknown");
-        setSpanAttribute("sender_url", _sender.url || "unknown");
+        setSpanAttribute("sender_url_host", sanitizeSenderUrl(_sender.url));
 
         let result: any;
 
@@ -280,6 +356,23 @@ export async function handleMessage(
           case MESSAGE.CONTENT_ANALYSIS_RESULT: {
             await handleContentAnalysisResult((message.payload as any)?.result);
             await notifyStateUpdate();
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.ANALYTICS_CONTENT_AGGREGATE: {
+            const payload = normalizeContentAggregatePayload(message.payload);
+            if (!payload) {
+              result = { success: false, error: "Invalid content aggregate payload" };
+              break;
+            }
+            await recordContentAggregate(payload);
+            result = { success: true };
+            break;
+          }
+
+          case MESSAGE.ANALYTICS_AUTH_CHANGED: {
+            // Auth watcher já é gerenciado diretamente pelo Firebase no SW.
             result = { success: true };
             break;
           }

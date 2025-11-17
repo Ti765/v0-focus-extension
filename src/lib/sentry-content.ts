@@ -26,7 +26,6 @@ import {
   getDefaultIntegrations,
   makeFetchTransport,
   Scope,
-  logger as sentryLogger,
   startSpan as sentryStartSpan,
 } from "@sentry/browser";
 import { 
@@ -36,18 +35,37 @@ import {
   getEnvironment,
   validateSentryConfig 
 } from "./sentry-config";
-import { createNoOpSpan } from "./sentry-utils";
+import {
+  captureWithIsolatedScope,
+  createNoOpSpan,
+  logWithIsolatedScope,
+  withIsolatedScope,
+} from "./sentry-utils";
 
 // CRITICAL: Use page-level flag to prevent multiple initializations
 // Content scripts can be injected multiple times into the same page
 // Using a flag on window/globalThis ensures we only init once per page, not per injection
 const SENTRY_INIT_FLAG = '__V0_SENTRY_CONTENT_INITIALIZED';
 
-// Flag to prevent multiple initializations in this module instance
-let isInitialized = false;
-let client: BrowserClient | null = null;
-let scope: Scope | null = null;
-let initPromise: Promise<{ client: BrowserClient | null; scope: Scope }> | null = null;
+interface ContentSentryState {
+  isInitialized: boolean;
+  client: BrowserClient | null;
+  scope: Scope | null;
+  initPromise: Promise<{ client: BrowserClient; scope: Scope }> | null;
+}
+
+const contentCarrier = globalThis as typeof globalThis & {
+  __V0_CONTENT_SENTRY_STATE__?: ContentSentryState;
+};
+
+const sharedState: ContentSentryState =
+  contentCarrier.__V0_CONTENT_SENTRY_STATE__ ??
+  (contentCarrier.__V0_CONTENT_SENTRY_STATE__ = {
+    isInitialized: false,
+    client: null,
+    scope: null,
+    initPromise: null,
+  });
 
 /**
  * Retry loop to wait for initialization to complete
@@ -58,18 +76,20 @@ async function waitForInitialization(
   backoffMs: number = 50
 ): Promise<{ client: BrowserClient | null; scope: Scope }> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (isInitialized && client && scope) {
-      return { client, scope };
+    if (sharedState.isInitialized && sharedState.client && sharedState.scope) {
+      return { client: sharedState.client, scope: sharedState.scope };
+    }
+    if (sharedState.initPromise) {
+      return sharedState.initPromise;
     }
     if (attempt < maxAttempts - 1) {
-      await new Promise(resolve => setTimeout(resolve, backoffMs));
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
     }
   }
-  
-  // If still not ready after retries, log warning and return fallback
+
   const env = getEnvironment();
-  if (env === 'development') {
-    console.warn('[v0][Sentry] Content script Sentry initialization still not ready after retries');
+  if (env === "development") {
+    console.warn("[v0][Sentry] Content script Sentry initialization still not ready after retries");
   }
   const dummyScope = new Scope();
   return { client: null, scope: dummyScope };
@@ -80,72 +100,55 @@ async function waitForInitialization(
  * This creates an isolated client that doesn't pollute global state
  */
 function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
-  // Validate configuration before attempting initialization
-  if (!validateSentryConfig('browser')) {
+  if (!validateSentryConfig("browser")) {
     const dummyScope = new Scope();
     return { client: null, scope: dummyScope };
   }
 
-  // Atomic check-and-set: if flag is already true, return early immediately
   if ((globalThis as any)[SENTRY_INIT_FLAG] === true) {
-    // Another script is initializing or already initialized
-    // Check if we can use existing client
-    if (isInitialized && client && scope) {
-      return { client, scope };
+    if (sharedState.isInitialized && sharedState.client && sharedState.scope) {
+      return { client: sharedState.client, scope: sharedState.scope };
     }
-    // If not ready yet, use retry loop with initPromise
-    // Multiple concurrent callers will wait on the same promise
-    if (!initPromise) {
-      initPromise = waitForInitialization();
-      // Update module state when promise resolves
-      initPromise.then((result) => {
+    if (!sharedState.initPromise) {
+      sharedState.initPromise = waitForInitialization().then((result) => {
         if (result.client && result.scope) {
-          client = result.client;
-          scope = result.scope;
-          isInitialized = true;
+          sharedState.client = result.client;
+          sharedState.scope = result.scope;
+          sharedState.isInitialized = true;
         }
-        initPromise = null;
-      }).catch(() => {
-        initPromise = null;
+        sharedState.initPromise = null;
+        return result as { client: BrowserClient; scope: Scope };
       });
     }
-    // For synchronous return at module load, we need immediate value
-    // So we return dummy scope and let async resolution update state
-    // This means first access might miss, but subsequent will work
-    const dummyScope = new Scope();
-    return { client: null, scope: dummyScope };
+    const fallbackScope = sharedState.scope ?? new Scope();
+    return { client: sharedState.client, scope: fallbackScope };
   }
 
-  // Atomically set flag BEFORE any initialization work to prevent race conditions
   (globalThis as any)[SENTRY_INIT_FLAG] = true;
 
-  // Create initPromise immediately so concurrent callers can await it
-  initPromise = performInitialization().then(
-    (result) => {
-      client = result.client;
-      scope = result.scope;
-      isInitialized = true;
-      initPromise = null; // Clear when done
+  sharedState.initPromise = performInitialization()
+    .then((result) => {
+      sharedState.client = result.client;
+      sharedState.scope = result.scope;
+      sharedState.isInitialized = true;
+      sharedState.initPromise = null;
       return result;
-    },
-    (error) => {
-      // Reset flag on failure so retry is possible
+    })
+    .catch((error) => {
       (globalThis as any)[SENTRY_INIT_FLAG] = false;
-      isInitialized = false;
-      client = null;
-      scope = null;
-      initPromise = null; // Clear on error
+      sharedState.isInitialized = false;
+      sharedState.client = null;
+      sharedState.scope = null;
+      sharedState.initPromise = null;
       throw error;
-    }
-  );
+    });
+  sharedState.initPromise.catch(() => {});
 
-  // Return dummy immediately for synchronous callers
-  // Real values will be available once promise resolves
   const dummyScope = new Scope();
   return { client: null, scope: dummyScope };
 }
 
-async function performInitialization(): Promise<{ client: BrowserClient | null; scope: Scope }> {
+async function performInitialization(): Promise<{ client: BrowserClient; scope: Scope }> {
   try {
     // Get configuration options
     const options = getContentSentryOptions();
@@ -191,16 +194,11 @@ async function performInitialization(): Promise<{ client: BrowserClient | null; 
     
     return { client: sentryClient, scope: isolatedScope };
   } catch (error) {
-    // Log error silently - content scripts should not pollute page console
-    // Only log in development to aid debugging
     const env = getEnvironment();
-    if (env === 'development') {
-      console.warn('[v0][Sentry] Failed to initialize Sentry in content script:', error);
+    if (env === "development") {
+      console.warn("[v0][Sentry] Failed to initialize Sentry in content script:", error);
     }
-    
-    // Return dummy client/scope to prevent errors
-    const dummyScope = new Scope();
-    return { client: null, scope: dummyScope };
+    throw error instanceof Error ? error : new Error(String(error));
   }
 }
 
@@ -212,11 +210,11 @@ initializeSentry();
  * These read from the mutable module-level variables, not frozen constants
  */
 function getCurrentClient(): BrowserClient | null {
-  return client;
+  return sharedState.client;
 }
 
 function getCurrentScope(): Scope | null {
-  return scope;
+  return sharedState.scope;
 }
 
 /**
@@ -229,7 +227,7 @@ export const Sentry = {
     const currentScope = getCurrentScope();
     const currentClient = getCurrentClient();
     if (!currentScope || !currentClient) return;
-    return currentScope.captureException(error, hint);
+    return captureWithIsolatedScope(error, hint, currentClient, currentScope);
   },
   
   // Capture message using isolated scope
@@ -237,7 +235,7 @@ export const Sentry = {
     const currentScope = getCurrentScope();
     const currentClient = getCurrentClient();
     if (!currentScope || !currentClient) return;
-    return currentScope.captureMessage(message, level);
+    return withIsolatedScope(currentClient, currentScope, (scope) => scope.captureMessage(message, level));
   },
   
   // Logger methods using isolated scope
@@ -246,19 +244,19 @@ export const Sentry = {
       const currentScope = getCurrentScope();
       const currentClient = getCurrentClient();
       if (!currentScope || !currentClient) return;
-      return sentryLogger.info(message, data, { scope: currentScope });
+      logWithIsolatedScope("info", message, data, currentClient, currentScope);
     },
     warn: (message: string, data?: any) => {
       const currentScope = getCurrentScope();
       const currentClient = getCurrentClient();
       if (!currentScope || !currentClient) return;
-      return sentryLogger.warn(message, data, { scope: currentScope });
+      logWithIsolatedScope("warning", message, data, currentClient, currentScope);
     },
     error: (message: string, data?: any) => {
       const currentScope = getCurrentScope();
       const currentClient = getCurrentClient();
       if (!currentScope || !currentClient) return;
-      return sentryLogger.error(message, data, { scope: currentScope });
+      logWithIsolatedScope("error", message, data, currentClient, currentScope);
     },
   },
   
@@ -270,8 +268,12 @@ export const Sentry = {
       // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
       return callback(createNoOpSpan() as any) as T;
     }
-    // Pass scope explicitly in options for manual clients
-    return sentryStartSpan({ ...options, scope: currentScope }, callback) as T;
+    return withIsolatedScope(
+      currentClient,
+      currentScope,
+      () => sentryStartSpan(options, callback) as T,
+      () => (callback(createNoOpSpan() as any) as T)
+    );
   },
   
   // Get client (for advanced usage)
@@ -282,5 +284,5 @@ export const Sentry = {
 };
 
 // Export scope getter for advanced usage
-export const getContentScope = () => scope;
+export const getContentScope = () => sharedState.scope;
 

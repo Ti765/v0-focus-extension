@@ -17,6 +17,7 @@ export const ALARM_NAMES = {
   POMODORO: "pomodoroAlarm",
   USAGE_TRACKER: "usageTrackerAlarm",
   DAILY_SYNC: "dailySyncAlarm",
+  ANALYTICS_SYNC: "analyticsSyncAlarm",
 } as const;
 
 // Configurações padrão do usuário
@@ -69,3 +70,18 @@ export const MAX_TEXT_LENGTH = 10000; // Analisar os primeiros 10000 caracteres
 
 // Intervalo do rastreador de uso em minutos (reduzido para melhor consistência)
 export const USAGE_TRACKER_INTERVAL = 0.5; // 30 segundos
+
+/**
+ * Espaço de chaves dedicado para os resumos diários e filas de sincronização.
+ */
+export const ANALYTICS_STORAGE = {
+  DAILY_SUMMARY_PREFIX: "__dailySummary", // armazenamos por dia: `${prefix}-${YYYY-MM-DD}`
+  PENDING_QUEUE: "__pendingDailySummaryQueue",
+  FLAGS: "__analyticsFlags",
+  SYNCED_DATES: "__dailySummarySyncedDates",
+} as const;
+
+/**
+ * Limite padrão de itens considerados nos rankings (queries, domínios, etc).
+ */
+export const ANALYTICS_TOP_ITEM_LIMIT = 10;

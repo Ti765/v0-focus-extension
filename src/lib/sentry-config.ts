@@ -12,24 +12,67 @@
 // Note: We don't import Sentry here since integrations will be imported
 // separately in each context file (React vs Browser)
 
+type SafeImportMetaEnv = {
+  MODE?: string;
+  NODE_ENV?: string;
+  [key: string]: string | boolean | undefined;
+};
+
+type ImportMetaWithEnv = { env?: SafeImportMetaEnv };
+
+let cachedViteEnv: SafeImportMetaEnv | undefined;
+
+export const getViteEnv = (): SafeImportMetaEnv => {
+  if (cachedViteEnv) {
+    return cachedViteEnv;
+  }
+
+  try {
+    cachedViteEnv = ((import.meta as ImportMetaWithEnv) ?? {}).env ?? {};
+  } catch {
+    cachedViteEnv = {};
+  }
+
+  return cachedViteEnv;
+};
+
+const asString = (value: SafeImportMetaEnv[keyof SafeImportMetaEnv]): string | undefined => {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+};
+
+const isEnvTrue = (value: SafeImportMetaEnv[keyof SafeImportMetaEnv]): boolean => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return value === "true";
+};
+
 /**
  * Sentry DSNs from environment variables
- * 
+ *
  * IMPORTANT: React and Browser SDKs require separate DSNs in Sentry.
  * - SENTRY_DSN_REACT: For @sentry/react (popup and options pages)
  * - SENTRY_DSN_BROWSER: For @sentry/browser (background and content scripts)
- * 
+ *
  * These values are read from environment variables at build time.
  * See .env.example for configuration instructions.
- * 
+ *
  * @see sentry_configuration.md
  * @see sentry_browser.md
  */
-export const SENTRY_DSN_REACT = import.meta.env.VITE_SENTRY_DSN_REACT || "";
-export const SENTRY_DSN_BROWSER = import.meta.env.VITE_SENTRY_DSN_BROWSER || "";
+const env = getViteEnv();
+
+export const SENTRY_DSN_REACT =
+  asString(env.VITE_SENTRY_DSN_REACT) ??
+  asString(env.SENTRY_DSN_REACT) ??
+  "";
+export const SENTRY_DSN_BROWSER =
+  asString(env.VITE_SENTRY_DSN_BROWSER) ??
+  asString(env.SENTRY_DSN_BROWSER) ??
+  "";
 
 // Keep SENTRY_DSN for backward compatibility (defaults to React DSN)
-export const SENTRY_DSN = SENTRY_DSN_REACT;
+export const SENTRY_DSN = SENTRY_DSN_REACT || SENTRY_DSN_BROWSER;
 
 /**
  * Determine environment based on build mode
@@ -42,28 +85,14 @@ export const SENTRY_DSN = SENTRY_DSN_REACT;
  * since process doesn't exist in Chrome extension runtime.
  */
 export const getEnvironment = (): string => {
-  try {
-    // Direct access to Vite-injected environment variables
-    // @ts-expect-error - import.meta.env is injected by Vite at build time
-    const env = import.meta.env;
-    if (env) {
-      const mode = env.MODE;
-      const nodeEnv = env.NODE_ENV;
-      
-      // If we have mode or nodeEnv, use them (Vite injected them)
-      if (mode || nodeEnv) {
-        return mode || nodeEnv || 'production';
-      }
-    }
-  } catch {
-    // import.meta.env may not be available - fall through to fallback
-  }
-  
-  // Final fallback - never access process.env directly in Chrome extensions
-  // Vite will replace process.env.NODE_ENV at build time if it exists in the code,
-  // but we should rely on import.meta.env instead
-  return 'production';
+  const viteEnv = getViteEnv();
+  const mode = asString(viteEnv.MODE);
+  const nodeEnv = asString(viteEnv.NODE_ENV);
+
+  return mode || nodeEnv || "production";
 };
+
+export const isDevEnvironment = (): boolean => getEnvironment() === "development";
 
 /**
  * Get release version from extension manifest
@@ -230,7 +259,7 @@ export function filterGlobalStateIntegrations<T extends { name?: string } | (() 
  */
 export const getBackgroundSentryOptions = (): Omit<CommonSentryOptions, 'dsn'> => {
   // Read from env with safe default (false)
-  const sendPii = import.meta.env.VITE_SENTRY_SEND_DEFAULT_PII === 'true';
+  const sendPii = isEnvTrue(getViteEnv().VITE_SENTRY_SEND_DEFAULT_PII);
   
   return {
     ...getCommonSentryOptions(),

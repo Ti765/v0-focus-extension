@@ -21,7 +21,6 @@ import {
   getDefaultIntegrations,
   makeFetchTransport,
   Scope,
-  logger as sentryLogger,
   startSpan as sentryStartSpan,
   browserTracingIntegration,
   consoleLoggingIntegration,
@@ -32,114 +31,116 @@ import {
   SENTRY_DSN_REACT, 
   getPopupSentryOptions,
   filterGlobalStateIntegrations,
-  validateSentryConfig 
+  validateSentryConfig,
+  getViteEnv,
+  isDevEnvironment,
 } from "./sentry-config";
-import { createNoOpSpan } from "./sentry-utils";
+import {
+  captureWithIsolatedScope,
+  createNoOpSpan,
+  logWithIsolatedScope,
+  withIsolatedScope,
+} from "./sentry-utils";
 
 // Flag to prevent multiple initializations
 let isInitialized = false;
 let client: BrowserClient | null = null;
 let scope: Scope | null = null;
+let initPromise: Promise<{ client: BrowserClient | null; scope: Scope }> | null = null;
+
+const isDevEnv = () => isDevEnvironment();
+
+const isFlagEnabled = (value: unknown): boolean => value === true || value === "true";
 
 /**
  * Initialize Sentry client for popup context
  * This creates an isolated client that doesn't pollute global state
  */
-function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
+async function initializeSentry(): Promise<{ client: BrowserClient | null; scope: Scope }> {
   if (isInitialized && client && scope) {
     return { client, scope };
   }
 
-  // Validate configuration before attempting initialization
-  if (!validateSentryConfig('react')) {
+  if (initPromise) {
+    return initPromise;
+  }
+
+  if (!validateSentryConfig("react")) {
     const dummyScope = new Scope();
     return { client: null, scope: dummyScope };
   }
 
-  try {
-    // Get configuration options
-    const options = getPopupSentryOptions();
-    
-    // Get default integrations and filter out those that use global state
-    const defaultIntegrations = getDefaultIntegrations({});
-    
-    // Filter out integrations that use global state
-    const safeIntegrations = filterGlobalStateIntegrations(defaultIntegrations);
-    
-    // Add browser tracing integration (opt-in, disabled by default for extension isolation)
-    // browserTracingIntegration uses global state and may break extension isolation
-    // Enable via environment variable: VITE_SENTRY_ENABLE_BROWSER_TRACING=true
-    const enableBrowserTracing = import.meta.env.VITE_SENTRY_ENABLE_BROWSER_TRACING === 'true';
-    
-    if (enableBrowserTracing) {
-      try {
-        const browserTracing = browserTracingIntegration();
-        safeIntegrations.push(browserTracing);
-      } catch (e) {
-        // browserTracingIntegration not available or error, skip it
-        console.warn('[v0][Sentry] Browser tracing integration not available:', e);
-      }
-    } else {
-      // Tracing disabled for popup contexts to maintain extension isolation
-      // @ts-expect-error - import.meta.env is injected by Vite at build time
-      if (import.meta.env?.MODE === 'development') {
-        console.log('[v0][Sentry] Browser tracing disabled for popup (isolation mode). Set VITE_SENTRY_ENABLE_BROWSER_TRACING=true to enable.');
-      }
-    }
-    
-    // Add console logging integration
-    // consoleLoggingIntegration should be safe as it only listens to console methods
+  initPromise = (async () => {
     try {
-      const consoleLogging = consoleLoggingIntegration({ levels: ['warn', 'error'] });
-      safeIntegrations.push(consoleLogging);
-    } catch (e) {
-      // consoleLoggingIntegration not available, skip it
-      console.warn('[v0][Sentry] Console logging integration not available:', e);
-    }
+      const options = getPopupSentryOptions();
+      const defaultIntegrations = getDefaultIntegrations({});
+      const safeIntegrations = filterGlobalStateIntegrations(defaultIntegrations);
 
-    // Create client manually (NOT using Sentry.init())
-    // Note: We use BrowserClient even for React contexts in browser extensions
-    const sentryClient = new BrowserClient({
-      dsn: SENTRY_DSN_REACT,
-      transport: makeFetchTransport,
-      stackParser: defaultStackParser,
-      integrations: safeIntegrations,
-      ...options,
-    });
+      const enableBrowserTracing = isFlagEnabled(getViteEnv().VITE_SENTRY_ENABLE_BROWSER_TRACING);
+      if (enableBrowserTracing) {
+        try {
+          const browserTracing = browserTracingIntegration();
+          safeIntegrations.push(browserTracing);
+        } catch (e) {
+          console.warn("[v0][Sentry] Browser tracing integration not available:", e);
+        }
+      } else {
+        if (isDevEnv()) {
+          console.log(
+            "[v0][Sentry] Browser tracing disabled for popup (isolation mode). Set VITE_SENTRY_ENABLE_BROWSER_TRACING=true to enable."
+          );
+        }
+      }
 
-    // Create isolated scope
-    const isolatedScope = new Scope();
-    isolatedScope.setClient(sentryClient);
-    
-    // Set initial scope tags if provided
-    if (options.initialScope?.tags) {
-      Object.entries(options.initialScope.tags).forEach(([key, value]) => {
-        isolatedScope.setTag(key, value);
+      try {
+        const consoleLogging = consoleLoggingIntegration({ levels: ["warn", "error"] });
+        safeIntegrations.push(consoleLogging);
+      } catch (e) {
+        console.warn("[v0][Sentry] Console logging integration not available:", e);
+      }
+
+      const sentryClient = new BrowserClient({
+        ...options,
+        dsn: SENTRY_DSN_REACT,
+        transport: makeFetchTransport,
+        stackParser: defaultStackParser,
+        integrations: safeIntegrations,
       });
+
+      const isolatedScope = new Scope();
+      isolatedScope.setClient(sentryClient);
+
+      if (options.initialScope?.tags) {
+        Object.entries(options.initialScope.tags).forEach(([key, value]) => {
+          isolatedScope.setTag(key, value);
+        });
+      }
+
+      sentryClient.init();
+
+      client = sentryClient;
+      scope = isolatedScope;
+      isInitialized = true;
+
+      if (isDevEnv()) {
+        console.log("[v0][Sentry] Popup monitoring initialized with isolated client");
+      }
+      return { client: sentryClient, scope: isolatedScope };
+    } catch (error) {
+      console.error("[v0][Sentry] Failed to initialize Sentry in popup:", error);
+      console.warn("[v0][Sentry] Popup will continue without Sentry monitoring");
+      const dummyScope = new Scope();
+      return { client: null, scope: dummyScope };
+    } finally {
+      initPromise = null;
     }
+  })();
 
-    // Initialize client (must be done after setting scope)
-    sentryClient.init();
-
-    client = sentryClient;
-    scope = isolatedScope;
-    isInitialized = true;
-
-    console.log('[v0][Sentry] Popup monitoring initialized with isolated client');
-    return { client: sentryClient, scope: isolatedScope };
-  } catch (error) {
-    // Log error but DO NOT throw - popup must render regardless
-    console.error('[v0][Sentry] Failed to initialize Sentry in popup:', error);
-    console.warn('[v0][Sentry] Popup will continue without Sentry monitoring');
-    
-    // Return dummy client/scope to prevent errors
-    const dummyScope = new Scope();
-    return { client: null, scope: dummyScope };
-  }
+  return initPromise;
 }
 
-// Initialize on module load
-const { client: popupClient, scope: popupScope } = initializeSentry();
+// Initialize on module load (fire-and-forget)
+void initializeSentry();
 
 /**
  * ErrorBoundary component that uses the isolated Sentry client/scope
@@ -161,11 +162,15 @@ export class ErrorBoundary extends React.Component<
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     // Capture error using our isolated scope
     // Fallback handling is done via state.hasError and render method
-    if (popupClient && popupScope) {
-      popupScope.setContext('react', {
-        componentStack: errorInfo.componentStack,
+    const currentClient = getCurrentClient();
+    const currentScope = getCurrentScope();
+    if (currentClient && currentScope) {
+      withIsolatedScope(currentClient, currentScope, (isolatedScope) => {
+        isolatedScope.setContext("react", {
+          componentStack: errorInfo.componentStack,
+        });
+        isolatedScope.captureException(error);
       });
-      popupScope.captureException(error);
     }
   }
 
@@ -179,7 +184,11 @@ export class ErrorBoundary extends React.Component<
       return (
         <div style={{ padding: '20px', textAlign: 'center' }}>
           <h2>Something went wrong</h2>
-          <button onClick={() => this.setState({ hasError: false, retryKey: this.state.retryKey + 1 })}>
+          <button
+            onClick={() =>
+              this.setState((prev) => ({ hasError: false, retryKey: prev.retryKey + 1 }))
+            }
+          >
             Try again
           </button>
         </div>
@@ -205,80 +214,98 @@ export const Sentry = {
   
   // Capture exception using isolated scope
   captureException: (error: Error, hint?: any) => {
-    if (!popupScope || !popupClient) {
-      // @ts-expect-error - import.meta.env is injected by Vite at build time
-      if (import.meta.env?.MODE === 'development') {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) {
+      if (isDevEnv()) {
         console.warn('[v0][Sentry] captureException called but Sentry is not initialized in popup', { error, hint });
       }
       return;
     }
-    return popupScope.captureException(error, hint);
+    return captureWithIsolatedScope(error, hint, currentClient, currentScope);
   },
   
   // Capture message using isolated scope
   captureMessage: (message: string, level?: any) => {
-    if (!popupScope || !popupClient) {
-      // @ts-expect-error - import.meta.env is injected by Vite at build time
-      if (import.meta.env?.MODE === 'development') {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) {
+      if (isDevEnv()) {
         console.warn('[v0][Sentry] captureMessage called but Sentry is not initialized in popup', { message, level });
       }
       return;
     }
-    return popupScope.captureMessage(message, level);
+    return withIsolatedScope(currentClient, currentScope, (isolatedScope) =>
+      isolatedScope.captureMessage(message, level)
+    );
   },
   
   // Logger methods using isolated scope
   logger: {
     info: (message: string, data?: any) => {
-      if (!popupScope || !popupClient) {
-        // @ts-expect-error - import.meta.env is injected by Vite at build time
-        if (import.meta.env?.MODE === 'development') {
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) {
+        if (isDevEnv()) {
           console.warn('[v0][Sentry] logger.info called but Sentry is not initialized in popup', { message, data });
         }
         return;
       }
-      return sentryLogger.info(message, data, { scope: popupScope });
+      logWithIsolatedScope("info", message, data, currentClient, currentScope);
     },
     warn: (message: string, data?: any) => {
-      if (!popupScope || !popupClient) {
-        // @ts-expect-error - import.meta.env is injected by Vite at build time
-        if (import.meta.env?.MODE === 'development') {
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) {
+        if (isDevEnv()) {
           console.warn('[v0][Sentry] logger.warn called but Sentry is not initialized in popup', { message, data });
         }
         return;
       }
-      return sentryLogger.warn(message, data, { scope: popupScope });
+      logWithIsolatedScope("warning", message, data, currentClient, currentScope);
     },
     error: (message: string, data?: any) => {
-      if (!popupScope || !popupClient) {
-        // @ts-expect-error - import.meta.env is injected by Vite at build time
-        if (import.meta.env?.MODE === 'development') {
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) {
+        if (isDevEnv()) {
           console.warn('[v0][Sentry] logger.error called but Sentry is not initialized in popup', { message, data });
         }
         return;
       }
-      return sentryLogger.error(message, data, { scope: popupScope });
+      logWithIsolatedScope("error", message, data, currentClient, currentScope);
     },
   },
   
   // Start span using isolated scope
   startSpan: <T,>(options: Parameters<typeof sentryStartSpan>[0], callback: Parameters<typeof sentryStartSpan>[1]): T => {
-    if (!popupScope || !popupClient) {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) {
       // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
       return callback(createNoOpSpan() as any) as T;
     }
     // Pass scope explicitly in options for manual clients
     // This ensures startSpan uses our isolated scope instead of trying to access global Sentry context
-    return sentryStartSpan({ ...options, scope: popupScope }, callback) as T;
+    return withIsolatedScope(
+      currentClient,
+      currentScope,
+      () => sentryStartSpan(options, callback) as T,
+      () => (callback(createNoOpSpan() as any) as T)
+    );
   },
   
   // Get client (for advanced usage)
-  getClient: () => popupClient,
+  getClient: () => getCurrentClient(),
   
   // Get scope (for advanced usage)
-  getScope: () => popupScope,
+  getScope: () => getCurrentScope(),
 };
 
-// Export scope for advanced usage
-export { popupScope as scope };
+function getCurrentClient(): BrowserClient | null {
+  return client;
+}
 
+function getCurrentScope(): Scope | null {
+  return scope;
+}

@@ -78,6 +78,6 @@
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io https://*"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com"
   }
 }

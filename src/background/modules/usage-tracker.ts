@@ -7,6 +7,8 @@ import { isDNRDebugEnabled, updateDebugConfigCache } from "../../shared/debug-co
 
 // Import debug configuration
 import { isTrackingDebugEnabledSync } from "../../shared/debug-config";
+import { recordDomainUsage } from "./daily-summary";
+import { maybeRecordSearchFromUrl } from "./search-insights";
 
 // --- Estado interno ---
 let activeTabId: number | null = null;
@@ -275,6 +277,18 @@ async function recordActiveTabUsage() {
   await chrome.storage.local.set({ [STORAGE_KEYS.DAILY_USAGE]: dailyUsage });
 
   console.log("[v0] Recorded usage:", domain, timeSpent, "seconds");
+
+  try {
+    await recordDomainUsage(domain, timeSpent);
+  } catch (error) {
+    console.warn("[v0] Analytics daily summary update failed:", error);
+  }
+
+  try {
+    await maybeRecordSearchFromUrl(trackingInfo.url);
+  } catch (error) {
+    console.warn("[v0] Search insight enrichment failed:", error);
+  }
 
   await notifyStateUpdate();
 

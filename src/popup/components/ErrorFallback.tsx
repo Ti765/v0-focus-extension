@@ -12,7 +12,8 @@ interface ErrorFallbackProps {
 
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   return (
-    <div style={{
+    <>
+      <div style={{
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -71,6 +72,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
         {resetError && (
           <button
             onClick={resetError}
+            className="error-fallback__retry"
             style={{
               width: '100%',
               padding: '10px 16px',
@@ -81,9 +83,8 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
               fontSize: '14px',
               fontWeight: '500',
               cursor: 'pointer',
+              transition: 'background-color 0.2s ease-in-out',
             }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
           >
             Tentar Novamente
           </button>
@@ -98,7 +99,15 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
           Se o problema persistir, tente recarregar a extensão
         </p>
       </div>
-    </div>
+      </div>
+      <style>
+        {`
+          .error-fallback__retry:hover {
+            background-color: #2563eb !important;
+          }
+        `}
+      </style>
+    </>
   );
 }
 

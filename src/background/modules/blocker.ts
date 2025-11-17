@@ -9,7 +9,17 @@ import { Sentry } from "../../lib/sentry-background";
 const POMODORO_RULE_ID_START = 1000;
 const USER_BLACKLIST_RULE_ID_START = 2000;
 const USER_BLACKLIST_RANGE = 1000; // IDs 2000..2999 reservados para a blacklist do usuário
-const CACHE_RULE_ID_OFFSET = 10000; // Offset para regras de modificação de cache
+const CACHE_RULE_ID_OFFSET = 10000; // Offset para regras de modificação de cachefunction createSpanAttributeSetter(span: any) {
+  return (key: string, value: unknown) => {
+    if (span && typeof span.setAttribute === "function") {
+      const safeValue =
+        typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+          ? value
+          : String(value);
+      span.setAttribute(key, safeValue);
+    }
+  };
+}
 
 // ---- Util: fila simples para evitar corridas no DNR ----
 let dnrQueue: Promise<any> = Promise.resolve();
@@ -37,16 +47,7 @@ export async function initializeBlocker() {
   return Sentry.startSpan(
     { op: "module.init", name: "Initialize Blocker" },
     async (span) => {
-      // Helper to safely set span attributes
-      const setSpanAttribute = (key: string, value: unknown) => {
-        if (span && typeof span.setAttribute === 'function') {
-          // Convert unknown to SpanAttributeValue (string | number | boolean)
-          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
-            ? value 
-            : String(value);
-          span.setAttribute(key, safeValue);
-        }
-      };
+      const setSpanAttribute = createSpanAttributeSetter(span);
 
       try {
         console.log("[v0] Initializing blocker module");
@@ -76,16 +77,7 @@ export async function cleanupAllDNRRules(): Promise<void> {
   return Sentry.startSpan(
     { op: "dnr.cleanup", name: "Cleanup All DNR Rules" },
     async (span) => {
-      // Helper to safely set span attributes
-      const setSpanAttribute = (key: string, value: unknown) => {
-        if (span && typeof span.setAttribute === 'function') {
-          // Convert unknown to SpanAttributeValue (string | number | boolean)
-          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
-            ? value 
-            : String(value);
-          span.setAttribute(key, safeValue);
-        }
-      };
+      const setSpanAttribute = createSpanAttributeSetter(span);
 
       console.log("[v0] Cleaning up all DNR rules...");
       
@@ -119,8 +111,11 @@ export async function cleanupAllDNRRules(): Promise<void> {
       } catch (error) {
         console.error("[v0] Error during DNR cleanup:", error);
         setSpanAttribute("success", false);
-        Sentry.logger.error("DNR cleanup failed", { error });
+        Sentry.logger.error("DNR cleanup failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
         Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
+        throw error;
       }
     }
   );
@@ -173,16 +168,7 @@ export async function addToBlacklist(domain: string) {
   return Sentry.startSpan(
     { op: "blocker.add", name: "Add to Blacklist" },
     async (span) => {
-      // Helper to safely set span attributes
-      const setSpanAttribute = (key: string, value: unknown) => {
-        if (span && typeof span.setAttribute === 'function') {
-          // Convert unknown to SpanAttributeValue (string | number | boolean)
-          const safeValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' 
-            ? value 
-            : String(value);
-          span.setAttribute(key, safeValue);
-        }
-      };
+      const setSpanAttribute = createSpanAttributeSetter(span);
 
       try {
         setSpanAttribute("domain", domain);
@@ -591,3 +577,4 @@ export async function disablePomodoroBlocking() {
     }
   });
 }
+

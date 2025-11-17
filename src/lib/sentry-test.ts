@@ -66,8 +66,12 @@ export async function testSentryBackground() {
       try {
         throw new Error("Sentry Test Error - Background Context");
       } catch (error) {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
-        console.log("[Sentry Test] Error captured");
+        if (sentryRef) {
+          sentryRef.captureException(error instanceof Error ? error : new Error(String(error)));
+          console.log("[Sentry Test] Error captured");
+        } else {
+          console.warn("[Sentry Test] Background Sentry unavailable; skipped error capture");
+        }
       }
       backgroundTestTimeout = null; // Clear tracking when callback runs
     }, 100);
@@ -75,10 +79,10 @@ export async function testSentryBackground() {
   } catch (error) {
     if (sentryRef) {
       sentryRef.captureException(error instanceof Error ? error : new Error(String(error)));
+      console.log("[Sentry Test] Error captured");
     } else {
       console.error("[Sentry Test] Background test failed before Sentry loaded", error);
     }
-    console.log("[Sentry Test] Error captured");
   }
   
   console.log("[Sentry Test] Check Sentry dashboard in 10-15 seconds");
@@ -119,8 +123,13 @@ export async function testSentryPopup() {
         try {
           throw new Error("Sentry Test Error - Popup Context");
         } catch (error) {
-          Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
-          console.log("[Sentry Test] Error captured from popup");
+          const hasClient = typeof Sentry.getClient === "function" && !!Sentry.getClient();
+          if (hasClient) {
+            Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
+            console.log("[Sentry Test] Error captured from popup");
+          } else {
+            console.warn("[Sentry Test] Popup Sentry unavailable; skipped error capture");
+          }
         }
         popupTestTimeout = null; // Clear tracking when callback runs
       }, 100);
@@ -164,8 +173,13 @@ export async function testSentryOptions() {
         try {
           throw new Error("Sentry Test Error - Options Context");
         } catch (error) {
-          Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
-          console.log("[Sentry Test] Error captured from options");
+          const hasClient = typeof Sentry.getClient === "function" && !!Sentry.getClient();
+          if (hasClient) {
+            Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
+            console.log("[Sentry Test] Error captured from options");
+          } else {
+            console.warn("[Sentry Test] Options Sentry unavailable; skipped error capture");
+          }
         }
         optionsTestTimeout = null; // Clear tracking when callback runs
       }, 100);
@@ -203,8 +217,13 @@ export async function testSentryContent() {
         try {
           throw new Error("Sentry Test Error - Content Script Context");
         } catch (error) {
-          Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
-          console.log("[Sentry Test] Error captured from content script");
+          const hasClient = typeof Sentry.getClient === "function" && !!Sentry.getClient();
+          if (hasClient) {
+            Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
+            console.log("[Sentry Test] Error captured from content script");
+          } else {
+            console.warn("[Sentry Test] Content script Sentry unavailable; skipped error capture");
+          }
         }
         contentTestTimeout = null; // Clear tracking when callback runs
       }, 100);
@@ -234,6 +253,8 @@ export async function testSentryComprehensive(context: "background" | "popup" | 
     case "content":
       Sentry = (await import("./sentry-content")).Sentry;
       break;
+    default:
+      throw new Error(`[Sentry Test] Unsupported context: ${context}`);
   }
   
   console.log(`[Sentry Test] Running comprehensive test for ${context}...`);

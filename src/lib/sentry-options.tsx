@@ -21,7 +21,6 @@ import {
   getDefaultIntegrations,
   makeFetchTransport,
   Scope,
-  logger as sentryLogger,
   startSpan as sentryStartSpan,
   browserTracingIntegration,
   consoleLoggingIntegration,
@@ -32,14 +31,23 @@ import {
   SENTRY_DSN_REACT, 
   getOptionsSentryOptions,
   filterGlobalStateIntegrations,
-  validateSentryConfig 
+  validateSentryConfig,
+  isDevEnvironment,
 } from "./sentry-config";
-import { createNoOpSpan } from "./sentry-utils";
+import {
+  captureWithIsolatedScope,
+  createNoOpSpan,
+  logWithIsolatedScope,
+  withIsolatedScope,
+} from "./sentry-utils";
 
 // Flag to prevent multiple initializations
 let isInitialized = false;
 let client: BrowserClient | null = null;
 let scope: Scope | null = null;
+let initPromise: Promise<void> | null = null;
+
+const isDevEnv = () => isDevEnvironment();
 
 /**
  * Initialize Sentry client for options page context
@@ -50,11 +58,18 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     return { client, scope };
   }
 
+  if (initPromise) {
+    const fallbackScope = scope ?? new Scope();
+    return { client, scope: fallbackScope };
+  }
+
   // Validate configuration before attempting initialization
   if (!validateSentryConfig('react')) {
     const dummyScope = new Scope();
     return { client: null, scope: dummyScope };
   }
+
+  initPromise = Promise.resolve();
 
   try {
     // Get configuration options
@@ -86,11 +101,11 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     // Create client manually (NOT using Sentry.init())
     // Note: We use BrowserClient even for React contexts in browser extensions
     const sentryClient = new BrowserClient({
+      ...options,
       dsn: SENTRY_DSN_REACT,
       transport: makeFetchTransport,
       stackParser: defaultStackParser,
       integrations: safeIntegrations,
-      ...options,
     });
 
     // Create isolated scope
@@ -111,7 +126,9 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     scope = isolatedScope;
     isInitialized = true;
 
-    console.log('[v0][Sentry] Options page monitoring initialized with isolated client');
+    if (isDevEnv()) {
+      console.log('[v0][Sentry] Options page monitoring initialized with isolated client');
+    }
     return { client: sentryClient, scope: isolatedScope };
   } catch (error) {
     // Log error but DO NOT throw - options page must render regardless
@@ -121,11 +138,20 @@ function initializeSentry(): { client: BrowserClient | null; scope: Scope } {
     // Return dummy client/scope to prevent errors
     const dummyScope = new Scope();
     return { client: null, scope: dummyScope };
+  } finally {
+    const clearLock = () => {
+      initPromise = null;
+    };
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(clearLock);
+    } else {
+      setTimeout(clearLock, 0);
+    }
   }
 }
 
 // Initialize on module load
-const { client: optionsClient, scope: optionsScope } = initializeSentry();
+initializeSentry();
 
 /**
  * ErrorBoundary component that uses the isolated Sentry client/scope
@@ -147,11 +173,15 @@ export class ErrorBoundary extends React.Component<
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     // Capture error using our isolated scope
     // Fallback handling is done via state.hasError and render method
-    if (optionsClient && optionsScope) {
-      optionsScope.setContext('react', {
-        componentStack: errorInfo.componentStack,
+    const currentClient = getCurrentClient();
+    const currentScope = getCurrentScope();
+    if (currentClient && currentScope) {
+      withIsolatedScope(currentClient, currentScope, (isolatedScope) => {
+        isolatedScope.setContext("react", {
+          componentStack: errorInfo.componentStack,
+        });
+        isolatedScope.captureException(error);
       });
-      optionsScope.captureException(error);
     }
   }
 
@@ -165,7 +195,11 @@ export class ErrorBoundary extends React.Component<
       return (
         <div style={{ padding: '20px', textAlign: 'center' }}>
           <h2>Something went wrong</h2>
-          <button onClick={() => this.setState({ hasError: false, retryKey: this.state.retryKey + 1 })}>
+          <button
+            onClick={() =>
+              this.setState((prev) => ({ hasError: false, retryKey: prev.retryKey + 1 }))
+            }
+          >
             Try again
           </button>
         </div>
@@ -191,50 +225,76 @@ export const Sentry = {
   
   // Capture exception using isolated scope
   captureException: (error: Error, hint?: any) => {
-    if (!optionsScope || !optionsClient) return;
-    return optionsScope.captureException(error, hint);
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) return;
+    return captureWithIsolatedScope(error, hint, currentClient, currentScope);
   },
   
   // Capture message using isolated scope
   captureMessage: (message: string, level?: any) => {
-    if (!optionsScope || !optionsClient) return;
-    return optionsScope.captureMessage(message, level);
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) return;
+    return withIsolatedScope(currentClient, currentScope, (isolatedScope) =>
+      isolatedScope.captureMessage(message, level)
+    );
   },
   
   // Logger methods using isolated scope
   logger: {
     info: (message: string, data?: any) => {
-      if (!optionsScope || !optionsClient) return;
-      return sentryLogger.info(message, data, { scope: optionsScope });
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      logWithIsolatedScope("info", message, data, currentClient, currentScope);
     },
     warn: (message: string, data?: any) => {
-      if (!optionsScope || !optionsClient) return;
-      return sentryLogger.warn(message, data, { scope: optionsScope });
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      logWithIsolatedScope("warning", message, data, currentClient, currentScope);
     },
     error: (message: string, data?: any) => {
-      if (!optionsScope || !optionsClient) return;
-      return sentryLogger.error(message, data, { scope: optionsScope });
+      const currentScope = getCurrentScope();
+      const currentClient = getCurrentClient();
+      if (!currentScope || !currentClient) return;
+      logWithIsolatedScope("error", message, data, currentClient, currentScope);
     },
   },
   
   // Start span using isolated scope
   startSpan: <T,>(options: Parameters<typeof sentryStartSpan>[0], callback: Parameters<typeof sentryStartSpan>[1]): T => {
-    if (!optionsScope || !optionsClient) {
+    const currentScope = getCurrentScope();
+    const currentClient = getCurrentClient();
+    if (!currentScope || !currentClient) {
       // If Sentry not available, run callback with a safe no-op span to prevent runtime errors
       return callback(createNoOpSpan() as any) as T;
     }
     // Pass scope explicitly in options for manual clients
     // This ensures startSpan uses our isolated scope instead of trying to access global Sentry context
-    return sentryStartSpan({ ...options, scope: optionsScope }, callback) as T;
+    return withIsolatedScope(
+      currentClient,
+      currentScope,
+      () => sentryStartSpan(options, callback) as T,
+      () => (callback(createNoOpSpan() as any) as T)
+    );
   },
   
   // Get client (for advanced usage)
-  getClient: () => optionsClient,
+  getClient: () => getCurrentClient(),
   
   // Get scope (for advanced usage)
-  getScope: () => optionsScope,
+  getScope: () => getCurrentScope(),
 };
 
 // Export scope for advanced usage
-export { optionsScope as scope };
+export { scope as scope };
 
+function getCurrentClient(): BrowserClient | null {
+  return client;
+}
+
+function getCurrentScope(): Scope | null {
+  return scope;
+}

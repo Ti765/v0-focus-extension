@@ -6,6 +6,15 @@ console.log("[v0] Service Worker starting up...");
 console.log("[v0] DEBUG: Extension version:", chrome.runtime.getManifest().version);
 console.log("[v0] DEBUG: Manifest permissions:", chrome.runtime.getManifest().permissions);
 
+void initializeAnalyticsConsentWatcher().catch((error) => {
+  console.warn("[v0] Analytics consent watcher failed to start:", error);
+});
+void Promise.resolve()
+  .then(() => initializeFirebaseAuthWatcher())
+  .catch((error) => {
+    console.warn("[v0] Firebase auth watcher failed to start:", error);
+  });
+
 import { initializePomodoro, startBreak } from "./modules/pomodoro";
 import {
   initializeBlocker,
@@ -25,6 +34,8 @@ import {
   DEFAULT_POMODORO_CONFIG,
 } from "../shared/constants";
 import type { AppState } from "../shared/types";
+import { initializeAnalyticsConsentWatcher } from "./modules/analytics-consent";
+import { initializeFirebaseAuthWatcher } from "./modules/firebase-auth";
 
 /** Bootstrap de todos os módulos do SW */
 async function bootstrap() {
